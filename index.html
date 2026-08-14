@@ -29,7 +29,7 @@
 <div class="row"><select id="filterEntity" class="field"><option value="">All entities</option><option>National Events</option><option>AWTCO</option><option>Personal</option></select>
 <select id="filterCategory" class="field"><option value="">All categories</option><option>Advertising</option><option>Fuel</option><option>Office Supplies</option><option>Equipment</option><option>Travel</option><option>Printing</option><option>Software</option><option>Repairs & Maintenance</option><option>Meals</option><option>Other</option></select></div>
 <button id="csvBtn" type="button" class="btn secondary">Export filtered receipts to CSV</button>
-</div><div id="receipts" class="muted" style="margin-top:12px">No receipts yet.</div></div></div><div id="detailModal" class="modal hidden"><div class="modalbox"><div class="modalhead"><h2 id="detailTitle">Receipt</h2><button id="detailClose" class="closebtn" type="button">×</button></div><div id="detailBody"></div></div></div>
+</div><div id="receipts" class="muted" style="margin-top:12px">No receipts yet.</div></div></div><div id="exportModal" class="modal hidden"><div class="modalbox"><div class="modalhead"><h2>Report export</h2><button id="exportClose" class="closebtn" type="button">×</button></div><p class="muted">Your CSV is ready. On iPhone, Share is usually the easiest way to save it to Files, Mail, Numbers or another app.</p><div class="form"><button id="shareReportBtn" type="button" class="btn primary">Share / Save CSV</button><button id="openReportBtn" type="button" class="btn secondary">Open CSV on screen</button></div><textarea id="exportPreview" class="field" rows="10" readonly style="margin-top:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px"></textarea></div></div><div id="detailModal" class="modal hidden"><div class="modalbox"><div class="modalhead"><h2 id="detailTitle">Receipt</h2><button id="detailClose" class="closebtn" type="button">×</button></div><div id="detailBody"></div></div></div>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
 let sb,user=null,allRows=[];const $=i=>document.getElementById(i),money=n=>new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(Number(n||0)),esc=s=>String(s||'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
 async function init(){try{const u='https://fvrtmoolruetqjxhrfvq.supabase.co',k=atob('c2JfcHVibGlzaGFibGVfdW9iYU42WEowNzBBZlZKN09FeHBNQV9SZy1xaUZ0Wg==');sb=supabase.createClient(u,k,{auth:{persistSession:true,autoRefreshToken:true}});$('loginMsg').textContent='';const {data}=await sb.auth.getSession();if(data.session?.user){user=data.session.user;$('gate').classList.add('hidden');load()}sb.auth.onAuthStateChange((e,s)=>{if(e==='SIGNED_OUT'){user=null;$('gate').classList.remove('hidden')}})}catch(e){$('loginMsg').textContent=e.message}}
@@ -141,11 +141,35 @@ function openReportDrill(type,value){
  $('reportDrill').classList.remove('hidden');
 }
 function closeReportDrill(){$('reportDrill').classList.add('hidden')}
-function exportReportCSV(){
+let currentReportCSV='',currentReportFilename='receipt-box-report.csv';
+function buildReportCSV(){
  const rows=reportPeriodRows(),heads=['Date','Supplier','Total','GST','Entity','Category','Project','Notes'],val=v=>'"'+String(v??'').replaceAll('"','""')+'"';
- const csv=[heads.map(val).join(','),...rows.map(r=>[r.receipt_date,r.supplier,r.total,r.gst,r.entity_name,r.category_name,r.project_name,r.notes].map(val).join(','))].join('\n');
- const period=$('reportPeriod').value;
- const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='receipt-box-'+period+'-report.csv';a.click();URL.revokeObjectURL(a.href);
+ return [heads.map(val).join(','),...rows.map(r=>[r.receipt_date,r.supplier,r.total,r.gst,r.entity_name,r.category_name,r.project_name,r.notes].map(val).join(','))].join('\n');
+}
+function exportReportCSV(){
+ currentReportCSV=buildReportCSV();
+ currentReportFilename='receipt-box-'+$('reportPeriod').value+'-report.csv';
+ $('exportPreview').value=currentReportCSV;
+ $('exportModal').classList.remove('hidden');
+}
+async function shareReportCSV(){
+ if(!currentReportCSV)currentReportCSV=buildReportCSV();
+ try{
+   const file=new File([currentReportCSV],currentReportFilename,{type:'text/csv'});
+   if(navigator.canShare&&navigator.canShare({files:[file]})&&navigator.share){await navigator.share({title:'Receipt Box report',files:[file]});return}
+ }catch(e){if(e.name==='AbortError')return}
+ openReportCSV();
+}
+function openReportCSV(){
+ if(!currentReportCSV)currentReportCSV=buildReportCSV();
+ const blob=new Blob([currentReportCSV],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob);
+ const w=window.open(url,'_blank');
+ if(!w){
+   const data='data:text/csv;charset=utf-8,'+encodeURIComponent(currentReportCSV);
+   window.location.href=data;
+ }
+ setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 
 function filteredRows(){
@@ -178,5 +202,5 @@ function exportCSV(){
  const csv=[heads.map(val).join(','),...rows.map(r=>[r.receipt_date,r.supplier,r.total,r.gst,r.entity_name,r.category_name,r.project_name,r.notes].map(val).join(','))].join('\n');
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='receipt-box-export.csv';a.click();URL.revokeObjectURL(a.href);
 }
-$('loginBtn').onclick=login;$('password').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();login()}};$('logoutBtn').onclick=async()=>{await sb.auth.signOut()};$('cameraFile').onchange=()=>{if($('cameraFile').files[0]){$('libraryFile').value='';$('fileName').textContent='Selected: '+$('cameraFile').files[0].name;showPreview();$('ocrStatus').textContent='Photo ready. Tap Read receipt automatically.'}};$('libraryFile').onchange=()=>{if($('libraryFile').files[0]){$('cameraFile').value='';$('fileName').textContent='Selected: '+$('libraryFile').files[0].name;showPreview();$('ocrStatus').textContent=$('libraryFile').files[0].type.startsWith('image/')?'Photo ready. Tap Read receipt automatically.':'PDF selected. Save is available, but automatic reading currently needs a photo.'}};$('date').addEventListener('input',()=>dateTouched=true);$('category').addEventListener('change',()=>categoryTouched=true);$('readBtn').onclick=readReceipt;$('saveBtn').onclick=save;$('search').oninput=renderRows;$('filterEntity').onchange=renderRows;$('filterCategory').onchange=renderRows;$('csvBtn').onclick=exportCSV;$('reportPeriod').onchange=()=>{closeReportDrill();renderReports()};$('reportCsvBtn').onclick=exportReportCSV;$('reportDrillClose').onclick=closeReportDrill;$('detailClose').onclick=()=>$('detailModal').classList.add('hidden');$('detailModal').onclick=e=>{if(e.target===$('detailModal'))$('detailModal').classList.add('hidden')};$('date').value=new Date().toISOString().slice(0,10);init();
+$('loginBtn').onclick=login;$('password').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();login()}};$('logoutBtn').onclick=async()=>{await sb.auth.signOut()};$('cameraFile').onchange=()=>{if($('cameraFile').files[0]){$('libraryFile').value='';$('fileName').textContent='Selected: '+$('cameraFile').files[0].name;showPreview();$('ocrStatus').textContent='Photo ready. Tap Read receipt automatically.'}};$('libraryFile').onchange=()=>{if($('libraryFile').files[0]){$('cameraFile').value='';$('fileName').textContent='Selected: '+$('libraryFile').files[0].name;showPreview();$('ocrStatus').textContent=$('libraryFile').files[0].type.startsWith('image/')?'Photo ready. Tap Read receipt automatically.':'PDF selected. Save is available, but automatic reading currently needs a photo.'}};$('date').addEventListener('input',()=>dateTouched=true);$('category').addEventListener('change',()=>categoryTouched=true);$('readBtn').onclick=readReceipt;$('saveBtn').onclick=save;$('search').oninput=renderRows;$('filterEntity').onchange=renderRows;$('filterCategory').onchange=renderRows;$('csvBtn').onclick=exportCSV;$('reportPeriod').onchange=()=>{closeReportDrill();renderReports()};$('reportCsvBtn').onclick=exportReportCSV;$('shareReportBtn').onclick=shareReportCSV;$('openReportBtn').onclick=openReportCSV;$('exportClose').onclick=()=>$('exportModal').classList.add('hidden');$('exportModal').onclick=e=>{if(e.target===$('exportModal'))$('exportModal').classList.add('hidden')};$('reportDrillClose').onclick=closeReportDrill;$('detailClose').onclick=()=>$('detailModal').classList.add('hidden');$('detailModal').onclick=e=>{if(e.target===$('detailModal'))$('detailModal').classList.add('hidden')};$('date').value=new Date().toISOString().slice(0,10);init();
 </script></body></html>
