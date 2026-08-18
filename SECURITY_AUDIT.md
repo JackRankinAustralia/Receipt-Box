@@ -1,6 +1,6 @@
 # Receipt Box Supabase security audit
 
-Audit date: 18 August 2026  
+Audit date: 18 August 2026
 Remediation verification: 18 August 2026
 Supabase project: `fvrtmoolruetqjxhrfvq` (`Receipt Box Project`)
 
