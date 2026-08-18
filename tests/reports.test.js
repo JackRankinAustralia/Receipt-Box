@@ -66,6 +66,24 @@ test('builds CSV report data for the selected period with escaped text', () => {
   assert.match(csv, /"Paper, pens"/)
 })
 
+test('neutralises spreadsheet formulas in every CSV value', () => {
+  const app = loadApp()
+  for (const prefix of ['=', '+', '-', '@']) {
+    assert.equal(app.call('csvValue', prefix + 'SUM(A1:A2)'), '"\'' + prefix + 'SUM(A1:A2)"')
+  }
+  assert.equal(app.call('csvValue', 'Normal supplier'), '"Normal supplier"')
+
+  app.setPeriod('all')
+  app.setRows([{
+    receipt_date: '2026-08-03', supplier: '=HYPERLINK("https://example.test")', total: 10, gst: 1,
+    entity_name: 'AWTCO', category_name: 'Other', project_name: '+CMD', notes: '@malicious'
+  }])
+  const csv = app.call('buildReportCSV')
+  assert.match(csv, /"'=HYPERLINK\(""https:\/\/example\.test""\)"/)
+  assert.match(csv, /"'\+CMD"/)
+  assert.match(csv, /"'@malicious"/)
+})
+
 test('passes selected-period metrics, summaries, and receipts to the PDF report', () => {
   const app = loadApp()
   app.setPeriod('all')
