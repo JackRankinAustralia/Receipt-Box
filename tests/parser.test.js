@@ -56,6 +56,33 @@ test('prefers OCR output containing receipt totals, payments, GST, and dates', (
   assert.ok(app.call('ocrResultScore', processed) > app.call('ocrResultScore', raw))
 })
 
+test('selects sideways receipt text over higher-confidence OCR gibberish', () => {
+  const app = loadApp()
+  const selected = app.call('chooseReceiptOrientation', {
+    0: { confidence: 64, text: 'nn ll 1 | i oo' },
+    90: { confidence: 48, text: 'BUNNINGS\nTAX INVOICE\nABN 26 008 672 179\nDATE 18/08/2026\nTOTAL $42.75\nGST $3.89\nVISA $42.75' },
+    180: { confidence: 58, text: 'wu 11 ee rr' },
+    270: { confidence: 71, text: 'lil on nu mm' }
+  })
+  assert.equal(selected.angle, 90)
+  assert.ok(selected.scores[90] > selected.scores[270])
+  assert.equal(app.call('orientationLabel', selected.angle), 'rotated 90° clockwise')
+})
+
+test('orientation selection handles upright, upside-down, and both sideways rotations', () => {
+  const app = loadApp()
+  for (const expected of [0, 90, 180, 270]) {
+    const results = Object.fromEntries([0, 90, 180, 270].map(angle => [angle, {
+      confidence: angle === expected ? 35 : 80,
+      text: angle === expected ? 'TAX INVOICE\nDATE 18/08/2026\nTOTAL $19.95\nEFT $19.95\nGST $1.81' : 'iii lll nnn'
+    }]))
+    assert.equal(app.call('chooseReceiptOrientation', results).angle, expected)
+  }
+  assert.equal(app.call('orientationLabel', 0), 'upright (0°)')
+  assert.equal(app.call('orientationLabel', 180), 'rotated 180° clockwise')
+  assert.equal(app.call('orientationLabel', 270), 'rotated 270° clockwise')
+})
+
 test('builds field-level consensus from Coles raw, enhanced, binary, and bottom OCR', () => {
   const app = loadApp()
   const fields = app.call('receiptFieldsFromOCR', colesOCR)
