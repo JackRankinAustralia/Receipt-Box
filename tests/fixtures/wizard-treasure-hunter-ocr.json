@@ -1,0 +1,18 @@
+{
+  "raw": {
+    "confidence": 53,
+    "text": "Wizard / Treasure Hunter Albury\nTax Invoice\n08/02/2022 11:46\nSubtotal: $17.70\nTotal: $17.70\nEFTPOS: $17.70\nChange: $0.00\nGST Inclusive: $1.61"
+  },
+  "enhanced": {
+    "confidence": 57,
+    "text": "Wizard / Treasure Hunter Albury\nTAX INVOICE\nDate 08/02/2022\nSub total $17.70\nTOTAL $17.70\nEFTPOS $17.70\nChange $0.00\nGST Inclusive $1.61"
+  },
+  "binary": {
+    "confidence": 49,
+    "text": "Wizard / Treasure Hunter Albury\nTAX INVOICE\n08/02/2022\nSubtotal $17.70\nTotaI $17.70\nEFTPOS $17.70\nGST Inclusive\n$1.61"
+  },
+  "bottom crop": {
+    "confidence": 31,
+    "text": "Subtota! $17.70\nTotal $17.70\nEFTPOS $17.70\nChange $0.00\nGST Inclusive $1.61"
+  }
+}

@@ -5,6 +5,8 @@ const path = require('node:path')
 const { loadApp } = require('./load-app')
 
 const colesOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'coles-ocr.json'), 'utf8'))
+// Reconstructed from the supplied Wizard receipt text; this is not verbatim OCR debug output.
+const wizardOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'wizard-treasure-hunter-ocr.json'), 'utf8'))
 
 test('recognises known suppliers and chooses a plausible unknown supplier', () => {
   const app = loadApp()
@@ -110,6 +112,23 @@ test('builds field-level consensus from Coles raw, enhanced, binary, and bottom 
   assert.ok(itemCandidate.score < 100)
   assert.match(itemCandidate.reason, /item-line context/i)
   assert.match(itemCandidate.reason, /item-line penalty/i)
+})
+
+test('keeps Wizard total and GST independent when both appear near TOTAL', () => {
+  const app = loadApp()
+  const fields = app.call('receiptFieldsFromOCR', wizardOCR)
+  assert.equal(fields.supplier.value, 'Wizard / Treasure Hunter Albury')
+  assert.equal(fields.date.value, '2022-02-08')
+  assert.equal(fields.total.value, 17.70)
+  assert.equal(fields.gst.value, 1.61)
+  assert.notEqual(fields.total.value, fields.gst.value)
+  const gstAsTotal = fields.candidates.totals.find(candidate => candidate.value === 1.61)
+  assert.ok(gstAsTotal.score < fields.total.score)
+  assert.match(gstAsTotal.reason, /GST-labelled amount/i)
+  assert.match(gstAsTotal.reason, /GST-labelled total exclusion/i)
+  assert.match(fields.total.reason, /TOTAL/i)
+  assert.match(fields.total.reason, /EFT\/payment/i)
+  assert.match(fields.total.reason, /matching TOTAL \+ payment context/i)
 })
 
 test('infers only a plausible final date digit near the receipt date', () => {
