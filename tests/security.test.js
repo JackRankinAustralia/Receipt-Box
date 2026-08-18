@@ -9,6 +9,7 @@ test('pins every CDN script with SHA-384 integrity and anonymous CORS', () => {
     .map(match => ({ src: match[1], integrity: match[2], crossorigin: match[3] }))
 
   assert.deepEqual(scripts.map(script => script.src), [
+    'https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js',
     'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3',
     'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js',
@@ -28,4 +29,9 @@ test('records least-privilege grants, authenticated policies, and upload limits'
   assert.match(sql, /with check \(\(select auth\.uid\(\)\) = user_id\);/i)
   assert.match(sql, /file_size_limit = 10485760/i)
   assert.match(sql, /allowed_mime_types = array\['image\/\*', 'application\/pdf'\]/i)
+})
+
+test('keeps the original selected receipt file for storage', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /async function save\(\).*?const id=crypto\.randomUUID\(\),f=originalReceiptFile\(\)/s)
 })

@@ -1,0 +1,27 @@
+{
+  "raw": {
+    "confidence": 40,
+    "text": "COLES\nTENA INCONTINENCE NI 10PACK $20.00\nMILK $5.00\nBREAD $4.00\nAPPLES $3.00\nBANANAS $2.00\nPASTA $1.00\nCOFFEE $6.00\nCHEESE $7.00\nDETERGENT $8.00\nYOGHURT $4.22\nRICE $3.00\nSOAP $2.00\nJUICE $5.00\nCEREAL $3.00\nitems and fragments\n$73.22"
+  },
+  "enhanced": {
+    "confidence": 45,
+    "text": "COLES\nDate: 13/08/202\nTENA INCONTINENCE NI 10PACK $20.00\nTotai Tor 14 iterns 2\nE F T 2"
+  },
+  "binary": {
+    "confidence": 45,
+    "text": "COLES\n13/08/202\nTENA INCONTINENCE NI 10PACK $20.00\nSUBTOTAL $70.00\nSAVINGS $3.22\nCHANGE $6.78"
+  },
+  "bottom crop": {
+    "confidence": 43,
+    "text": "TENA INCONTINENCE NI 10PACK $20.00\nnoise\nnoise\notal Tor 14 items: $ /3.22\nEF7 $73...\nGST INCLUOED IN T0TAL\n1 31",
+    "lines": [
+      { "text": "TENA INCONTINENCE NI 10PACK $20.00", "bbox": { "y0": 20, "y1": 40 } },
+      { "text": "noise", "bbox": { "y0": 80, "y1": 100 } },
+      { "text": "noise", "bbox": { "y0": 120, "y1": 140 } },
+      { "text": "otal Tor 14 items: $ /3.22", "bbox": { "y0": 310, "y1": 340 } },
+      { "text": "EF7 $73...", "bbox": { "y0": 350, "y1": 380 } },
+      { "text": "GST INCLUOED IN T0TAL", "bbox": { "y0": 390, "y1": 420 } },
+      { "text": "1 31", "bbox": { "y0": 430, "y1": 455 } }
+    ]
+  }
+}

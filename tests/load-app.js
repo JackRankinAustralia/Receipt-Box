@@ -70,6 +70,9 @@ function loadApp() {
     },
     setPDFConstructor(PDF) {
       context.window.jspdf = { jsPDF: PDF }
+    },
+    setHeicConverter(converter) {
+      context.heic2any = converter
     }
   }
 }
