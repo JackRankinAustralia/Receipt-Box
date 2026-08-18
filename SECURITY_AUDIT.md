@@ -65,10 +65,28 @@ The private bucket currently has no `file_size_limit` or `allowed_mime_types`. O
 
 Recommended follow-up: set limits matching the frontend's supported images and PDFs after choosing an acceptable maximum receipt size.
 
+### 6. CSV exports do not neutralize spreadsheet formulas
+
+Severity: medium
+
+CSV values are correctly quoted, but a supplier, project, or note beginning with `=`, `+`, `-`, or `@` can still be interpreted as a formula when the export is opened in Excel or similar software. Receipt data is owner-controlled today, which reduces exposure, but imported or shared receipt data could make this a formula-injection path.
+
+Recommended follow-up: prefix formula-like values with an apostrophe when producing CSV while retaining the original values in Supabase and the on-screen reports.
+
+### 7. Existing CDN dependencies are not fully pinned or integrity-checked
+
+Severity: medium
+
+Tesseract and Supabase are loaded from major-version CDN aliases (`@5` and `@2`), and none of the remote scripts use Subresource Integrity. A compromised CDN response or an unexpected compatible-version release would execute with access to the user's authenticated browser session. The newer PDF dependencies are pinned to exact versions but also lack integrity metadata. The page does not define a Content Security Policy.
+
+Recommended follow-up: pin every dependency to an exact reviewed version, add integrity and `crossorigin` attributes where supported, and introduce a Content Security Policy when the application is split into static assets. This should be tested carefully because the current single-file application relies on inline script and style.
+
 ## Functionality-sensitive notes
 
 - Storage has no `UPDATE` policy. The current frontend uploads unique object names and does not use overwrite/upsert, so this does not break existing behavior and is not an ownership gap.
 - The frontend deletes a Storage object before deleting its receipt row. Both operations are owner-scoped, but they are not transactional; a failed second operation can leave an orphaned row or file. This is a consistency concern, not a cross-user access issue.
+- Receipt and report HTML interpolations pass user-controlled strings through the existing `esc()` function. Receipt identifiers used by inline handlers are UUID database values, so no direct stored-XSS path was found in the inspected rendering code.
+- Signed receipt URLs expire after 300 seconds. Opening them with `noopener` would be a sensible additional browser hardening measure.
 - No production policies or grants were changed during this audit.
 
 ## Authoritative references
