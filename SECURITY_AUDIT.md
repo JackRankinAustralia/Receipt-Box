@@ -1,6 +1,7 @@
 # Receipt Box Supabase security audit
 
 Audit date: 18 August 2026  
+Remediation verification: 18 August 2026
 Supabase project: `fvrtmoolruetqjxhrfvq` (`Receipt Box Project`)
 
 ## Outcome
@@ -8,12 +9,18 @@ Supabase project: `fvrtmoolruetqjxhrfvq` (`Receipt Box Project`)
 Receipt records and receipt files are currently isolated by authenticated owner.
 
 - Row Level Security is enabled on `public.receipts`.
-- `SELECT`, `INSERT`, `UPDATE`, and `DELETE` policies compare `auth.uid()` with `receipts.user_id`.
-- The `UPDATE` policy has a `USING` expression and no separately displayed `WITH CHECK`. PostgreSQL reuses `USING` as `WITH CHECK` when the latter is omitted, so an owner cannot transfer a row to another user.
+- Anonymous users have no table privileges on `public.receipts`.
+- Authenticated users have exactly `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges.
+- All four receipt policies explicitly target `authenticated` and compare `(select auth.uid())` with `receipts.user_id`.
+- The `UPDATE` policy has explicit ownership checks for both the existing and resulting row, so an owner cannot transfer a row to another user.
+- `receipts.user_id` is `NOT NULL` and retains its foreign key to `auth.users(id)`.
 - The `receipts` Storage bucket is private.
-- Storage `SELECT`, `INSERT`, and `DELETE` policies require the first object-path segment to equal `auth.uid()` and restrict access to the `receipts` bucket.
+- Storage `SELECT`, `INSERT`, and `DELETE` policies explicitly target `authenticated`, restrict access to the `receipts` bucket, and require the first object-path segment to equal `auth.uid()`. Reads and deletes also require the Storage object owner to match.
+- Receipt uploads are restricted to `image/*` and `application/pdf`, with a 10 MB maximum file size.
 - The browser contains a Supabase publishable key, not a service-role or secret key.
 - There are no public-schema views that could bypass the table's RLS policies.
+- CSV exports neutralize formula-like values beginning with `=`, `+`, `-`, or `@`.
+- All four CDN dependencies are pinned to exact versions and protected with SHA-384 Subresource Integrity plus anonymous CORS mode.
 
 Live aggregate verification found:
 
@@ -23,63 +30,25 @@ Live aggregate verification found:
 - 0 receipt-to-object owner mismatches.
 - 0 receipt file references missing from Storage.
 
-## Hardening findings
+## Remediation status
 
-### 1. `anon` has broader table grants than the frontend needs
+Resolved:
 
-Severity: medium
+- Removed every `anon` privilege from `public.receipts`, including `TRUNCATE`.
+- Reduced `authenticated` privileges to receipt CRUD only.
+- Recreated receipt and Storage ownership policies with `TO authenticated`.
+- Added an explicit `WITH CHECK` to receipt updates.
+- Verified all existing receipt rows had owners, then asserted `user_id NOT NULL` in the applied migration. The column was already non-null in production at preflight and remains so.
+- Added private-bucket upload restrictions: images/PDF only, maximum 10 MB.
+- Neutralized CSV spreadsheet formulas while retaining the original database values and on-screen text.
+- Pinned Tesseract `5.1.1`, Supabase JS `2.112.3`, jsPDF `2.5.2`, and jsPDF-AutoTable `3.8.4`; added SHA-384 integrity and `crossorigin="anonymous"` to each script.
 
-`anon` currently has `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, and `TRIGGER` grants on `public.receipts`. RLS prevents anonymous row access because `auth.uid()` is null, and PostgREST does not directly expose `TRUNCATE`, but least-privilege grants should not rely on those surrounding protections. In particular, PostgreSQL row security does not apply to `TRUNCATE`.
+Remaining recommendations:
 
-Recommended follow-up: revoke unnecessary `anon` privileges and limit `authenticated` to the four operations used by the application. Test the deployed frontend after changing grants.
-
-### 2. Ownership policies target `public` rather than `authenticated`
-
-Severity: low
-
-The policies are secure as written because unauthenticated `auth.uid()` is null and cannot satisfy the ownership expressions. Scoping the policies explicitly to `authenticated` would make intent clearer, avoid unnecessary policy evaluation for anonymous requests, and align with current Supabase guidance.
-
-Recommended follow-up: recreate the receipt and Storage policies with `TO authenticated`, preserving the same ownership expressions.
-
-### 3. `receipts.user_id` is nullable at the schema level
-
-Severity: low
-
-The insert policy prevents browser users from creating an ownerless row, and all existing rows have an owner. A privileged process or future server integration could still create one because the column has no `NOT NULL` constraint.
-
-Recommended follow-up: add `NOT NULL` after confirming every production row has an owner, and retain the foreign key to `auth.users(id)`.
-
-### 4. Leaked-password protection is disabled
-
-Severity: low
-
-The Supabase security advisor reports that compromised-password checking is disabled.
-
-Recommended follow-up: enable leaked-password protection in Auth settings. See [Supabase password security](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
-
-### 5. Receipt uploads have no bucket-level size or MIME restrictions
-
-Severity: low
-
-The private bucket currently has no `file_size_limit` or `allowed_mime_types`. Ownership remains protected, but authenticated users can upload unexpectedly large or unsupported file types by calling Storage directly.
-
-Recommended follow-up: set limits matching the frontend's supported images and PDFs after choosing an acceptable maximum receipt size.
-
-### 6. CSV exports do not neutralize spreadsheet formulas
-
-Severity: medium
-
-CSV values are correctly quoted, but a supplier, project, or note beginning with `=`, `+`, `-`, or `@` can still be interpreted as a formula when the export is opened in Excel or similar software. Receipt data is owner-controlled today, which reduces exposure, but imported or shared receipt data could make this a formula-injection path.
-
-Recommended follow-up: prefix formula-like values with an apostrophe when producing CSV while retaining the original values in Supabase and the on-screen reports.
-
-### 7. Existing CDN dependencies are not fully pinned or integrity-checked
-
-Severity: medium
-
-Tesseract and Supabase are loaded from major-version CDN aliases (`@5` and `@2`), and none of the remote scripts use Subresource Integrity. A compromised CDN response or an unexpected compatible-version release would execute with access to the user's authenticated browser session. The newer PDF dependencies are pinned to exact versions but also lack integrity metadata. The page does not define a Content Security Policy.
-
-Recommended follow-up: pin every dependency to an exact reviewed version, add integrity and `crossorigin` attributes where supported, and introduce a Content Security Policy when the application is split into static assets. This should be tested carefully because the current single-file application relies on inline script and style.
+- **Leaked-password protection:** the project is on Supabase Free, so this setting was not enabled. Treat it as a production-plan upgrade recommendation. See [Supabase password security](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
+- **Content Security Policy:** SRI now protects the external scripts, but the single-file application still uses inline CSS, inline JavaScript, and inline event handlers. A strict CSP should be introduced alongside the later asset split/refactor rather than weakening or breaking the current application.
+- **Dependency updates:** exact pins intentionally stop automatic upgrades. Review new versions deliberately, recompute SRI hashes, run the full suite, and test the deployed login/OCR/PDF flows before updating.
+- **Performance follow-up:** the post-migration performance advisor reports pre-existing unindexed foreign keys and unoptimized `auth.uid()` calls on the separate `entities`, `categories`, and `projects` policies. These do not weaken receipt ownership and were left outside this security remediation.
 
 ## Functionality-sensitive notes
 
@@ -87,7 +56,19 @@ Recommended follow-up: pin every dependency to an exact reviewed version, add in
 - The frontend deletes a Storage object before deleting its receipt row. Both operations are owner-scoped, but they are not transactional; a failed second operation can leave an orphaned row or file. This is a consistency concern, not a cross-user access issue.
 - Receipt and report HTML interpolations pass user-controlled strings through the existing `esc()` function. Receipt identifiers used by inline handlers are UUID database values, so no direct stored-XSS path was found in the inspected rendering code.
 - Signed receipt URLs expire after 300 seconds. Opening them with `noopener` would be a sensible additional browser hardening measure.
-- No production policies or grants were changed during this audit.
+- Production changes are recorded in `supabase/migrations/20260818005236_harden_receipt_ownership_and_uploads.sql` and in Supabase migration history as `harden_receipt_ownership_and_uploads`.
+
+## Post-remediation verification
+
+- RLS remains enabled on `public.receipts`.
+- `anon` grants: none.
+- `authenticated` grants: `SELECT`, `INSERT`, `UPDATE`, `DELETE` only.
+- Receipt and Storage policies: `authenticated` only with owner checks.
+- `receipts.user_id`: not nullable; 0 ownerless rows.
+- Storage bucket: private; 10,485,760-byte limit; `image/*` and `application/pdf` only.
+- Existing data: 4 receipts, 0 missing objects, 0 path mismatches, 0 owner mismatches.
+- Supabase security advisor: only leaked-password protection disabled, retained as a Free-plan upgrade recommendation.
+- Automated tests: 10 passed, 0 failed.
 
 ## Authoritative references
 
