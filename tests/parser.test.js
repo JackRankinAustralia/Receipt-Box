@@ -126,6 +126,32 @@ test('locks the reconstructed sideways Bunnings fields and inferred year', () =>
   assert.match(fields.total.reason, /matching SUBTOTAL corroboration/i)
 })
 
+test('applies Bunnings consensus through the same result path used by automatic reading', () => {
+  const app = loadApp()
+  app.element('supplier').value = 'Bunnings'
+  app.element('date').value = '2003-05-10'
+  app.element('amount').value = '13.30'
+  app.element('gst').value = '9.45'
+  app.element('category').value = 'Other'
+
+  const applied = app.call('applyReceiptOCRResults', bunningsSideways.ocr, {
+    referenceDate: new Date('2026-08-18T12:00:00+10:00'),
+    orientation: { angle: 90, scores: { 0: 12, 90: 95, 180: 8, 270: 10 } }
+  })
+
+  assert.equal(applied.fields.supplier.value, 'Bunnings')
+  assert.equal(applied.fields.date.value, '2023-05-10')
+  assert.equal(applied.fields.total.value, 104.14)
+  assert.equal(applied.fields.gst.value, 9.45)
+  assert.equal(app.element('supplier').value, 'Bunnings')
+  assert.equal(app.element('date').value, '2023-05-10')
+  assert.equal(app.element('amount').value, '104.14')
+  assert.equal(app.element('gst').value, '9.45')
+  assert.equal(app.element('category').value, 'Repairs & Maintenance')
+  assert.notEqual(app.element('amount').value, '13.30')
+  assert.match(app.element('dateDetection').textContent, /inferred/i)
+})
+
 test('reads the exact Bunnings date text as 2023 rather than 2003', () => {
   const app = loadApp()
   const info = app.call('dateInfoFromText', 'BUNNINGS TAX INVOICE ABN 26 008 672 179 Date 10/05/2023 TOTAL GST EFT', new Date('2026-08-18T12:00:00+10:00'))
