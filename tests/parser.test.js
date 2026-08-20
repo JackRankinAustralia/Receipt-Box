@@ -7,11 +7,15 @@ const { loadApp } = require('./load-app')
 const colesOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'coles-ocr.json'), 'utf8'))
 // Reconstructed from the supplied Wizard receipt text; this is not verbatim OCR debug output.
 const wizardOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'wizard-treasure-hunter-ocr.json'), 'utf8'))
+// Reconstructed from the supplied cropped receipt text; verbatim OCR debug output was unavailable.
+const genericWasteOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'generic-waste-ocr.json'), 'utf8'))
+const bunningsSideways = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'bunnings-sideways-ocr.json'), 'utf8'))
 
 test('recognises known suppliers and chooses a plausible unknown supplier', () => {
   const app = loadApp()
   assert.equal(app.call('supplierFromLines', ['TAX INVOICE', 'OFFICEWORKS 0421', 'Melbourne VIC'], 'OFFICEWORKS 0421'), 'Officeworks')
   assert.equal(app.call('supplierFromLines', ['TAX INVOICE', 'Bright Star Catering', '12 Smith Street'], 'Bright Star Catering'), 'Bright Star Catering')
+  assert.equal(app.call('supplierFromLines', ['TOTAL TOOLS ALBURY', 'ABN 12 345 678 901'], 'TOTAL TOOLS ALBURY'), 'TOTAL TOOLS ALBURY')
 })
 
 test('detects HEIC and HEIF photos without changing other upload types', () => {
@@ -85,6 +89,93 @@ test('orientation selection handles upright, upside-down, and both sideways rota
   assert.equal(app.call('orientationLabel', 270), 'rotated 270° clockwise')
 })
 
+test('selects coherent sideways Bunnings receipt text over fragmented orientations', () => {
+  const app = loadApp()
+  const line = (text, y, width = 520) => ({ text, bbox: { x0: 10, y0: y, x1: width, y1: y + 24 } })
+  const selected = app.call('chooseReceiptOrientation', {
+    0: { confidence: 52, text: 'BUNNINGS\ni i | 13.30\nrr # ? n', lines: [line('BUNNINGS', 10, 90), line('i i | 13.30', 40, 70)] },
+    90: {
+      confidence: 49,
+      text: 'BUNNINGS\nTAX INVOICE\nABN 26 008 672 179\n10/05/2023\nTOTAL $104.14\nGST INCLUDED IN THE TOTAL',
+      lines: [line('BUNNINGS', 10), line('TAX INVOICE', 40), line('ABN 26 008 672 179', 70), line('10/05/2023', 100), line('TOTAL $104.14', 130), line('GST INCLUDED IN THE TOTAL', 160)]
+    },
+    180: { confidence: 55, text: 's 1 l\n30.31 | |\nnu ?', lines: [line('s 1 l', 10, 55)] },
+    270: { confidence: 51, text: '1 i i\nBUNN IN GS\n4.10 41', lines: [line('1 i i', 10, 60)] }
+  })
+  assert.equal(selected.angle, 90)
+  assert.ok(selected.scores[90] > selected.scores[0])
+  assert.equal(app.call('suggestCategory', selected.data.text, 'Bunnings'), 'Repairs & Maintenance')
+})
+
+test('locks the reconstructed sideways Bunnings fields and inferred year', () => {
+  const app = loadApp()
+  const orientation = app.call('chooseReceiptOrientation', bunningsSideways.orientationProbes)
+  const fields = app.call('receiptFieldsFromOCR', bunningsSideways.ocr, { referenceDate: new Date('2026-08-18T12:00:00+10:00') })
+  assert.equal(orientation.angle, 90)
+  assert.equal(fields.supplier.value, 'Bunnings')
+  assert.equal(fields.date.value, '2023-05-10')
+  assert.match(fields.date.reason, /inferred from 2003-05-10/i)
+  assert.equal(fields.total.value, 104.14)
+  assert.equal(fields.gst.value, 9.45)
+  assert.equal(app.call('suggestCategory', bunningsSideways.ocr.raw.text, fields.supplier.value), 'Repairs & Maintenance')
+  const item = fields.candidates.totals.find(candidate => candidate.value === 13.30)
+  assert.notEqual(fields.total.value, 13.30)
+  assert.ok(item.score < fields.total.score)
+  assert.match(item.reason, /item-line penalty/i)
+  assert.match(fields.total.reason, /decisive explicit TOTAL \+ payment agreement/i)
+  assert.match(fields.total.reason, /matching SUBTOTAL corroboration/i)
+})
+
+test('reads the exact Bunnings date text as 2023 rather than 2003', () => {
+  const app = loadApp()
+  const info = app.call('dateInfoFromText', 'BUNNINGS TAX INVOICE ABN 26 008 672 179 Date 10/05/2023 TOTAL GST EFT', new Date('2026-08-18T12:00:00+10:00'))
+  assert.equal(info.value, '2023-05-10')
+  assert.equal(info.inferred, false)
+  assert.equal(app.call('isoDateFromText', '10/05/2023'), '2023-05-10')
+})
+
+test('manual rotate updates the preview and can be reset', () => {
+  const app = loadApp()
+  app.element('cameraFile').files = [new File([new Uint8Array([1])], 'sideways.jpg', { type: 'image/jpeg' })]
+  app.element('libraryFile').files = []
+  app.call('showPreview')
+  assert.equal(app.element('previewFrame').style.display, 'grid')
+  for (const angle of [90, 180, 270, 0]) {
+    app.call('rotateReceiptPreview')
+    assert.equal(app.element('receiptPreview').style.transform, `rotate(${angle}deg)`)
+  }
+  app.call('resetReceiptForm')
+  assert.equal(app.element('receiptPreview').style.transform, '')
+  assert.equal(app.element('previewFrame').style.display, 'none')
+})
+
+test('preview container clips rotated portrait and landscape images above controls', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /\.previewframe\{[^}]*aspect-ratio:1[^}]*overflow:hidden/i)
+  assert.match(html, /\.previewframe \.preview\{[^}]*max-width:90%[^}]*max-height:90%[^}]*object-fit:contain/i)
+  assert.match(html, /id="previewFrame"[^>]*>\s*<img id="receiptPreview"[\s\S]*?<\/div>\s*<button id="rotateBtn"/i)
+})
+
+test('clears the receipt form without touching stored receipt rows', () => {
+  const app = loadApp()
+  const savedRows = [{ id: 'saved-receipt', supplier: 'Bunnings', total: 104.14 }]
+  app.setRows(savedRows)
+  for (const [id, value] of Object.entries({ supplier: 'Bunnings', date: '2023-05-10', amount: '104.14', gst: '9.47', entity: 'Personal', category: 'Repairs & Maintenance', project: 'Shed', notes: 'Keep me' })) app.element(id).value = value
+  app.element('cameraFile').value = 'receipt.jpg'
+  app.element('cameraFile').files = []
+  app.element('libraryFile').files = []
+  app.element('saveBtn').textContent = 'Update receipt'
+  app.element('saveBtn').dataset.edit = 'saved-receipt'
+  app.call('resetReceiptForm')
+  for (const id of ['supplier', 'amount', 'gst', 'project', 'notes', 'cameraFile', 'libraryFile']) assert.equal(app.element(id).value, '')
+  assert.equal(app.element('date').value, '2026-08-18')
+  assert.equal(app.element('entity').value, 'National Events')
+  assert.equal(app.element('category').value, 'Other')
+  assert.equal(app.element('saveBtn').textContent, 'Save receipt')
+  assert.equal(app.element('saveBtn').dataset.edit, undefined)
+  assert.deepEqual(savedRows, [{ id: 'saved-receipt', supplier: 'Bunnings', total: 104.14 }])
+})
+
 test('builds field-level consensus from Coles raw, enhanced, binary, and bottom OCR', () => {
   const app = loadApp()
   const fields = app.call('receiptFieldsFromOCR', colesOCR)
@@ -129,6 +220,36 @@ test('keeps Wizard total and GST independent when both appear near TOTAL', () =>
   assert.match(fields.total.reason, /TOTAL/i)
   assert.match(fields.total.reason, /EFT\/payment/i)
   assert.match(fields.total.reason, /matching TOTAL \+ payment context/i)
+})
+
+test('prefers Total Price over tendered cash and component fees', () => {
+  const app = loadApp()
+  const fields = app.call('receiptFieldsFromOCR', genericWasteOCR)
+  assert.equal(fields.supplier, null)
+  assert.equal(fields.total.value, 149.90)
+  assert.equal(fields.gst.value, 13.64)
+  const tendered = fields.candidates.totals.find(candidate => candidate.value === 180)
+  assert.ok(tendered.score < fields.total.score)
+  assert.match(tendered.reason, /tendered amount/i)
+  assert.match(tendered.reason, /tendered amount exclusion/i)
+  for (const component of [35, 82.50, 18.76]) {
+    const candidate = fields.candidates.totals.find(item => item.value === component)
+    assert.ok(candidate.score < fields.total.score)
+    assert.match(candidate.reason, /item-line context/i)
+  }
+  assert.match(fields.total.reason, /TOTAL/i)
+})
+
+test('parses Total Price without mistaking Amount Tendered for the transaction total', () => {
+  const app = loadApp()
+  const lines = [
+    'GST: $13.64',
+    'Total Price: $149.90',
+    'The Total Price Includes GST',
+    'Total Amount Tendered: $180.00'
+  ]
+  assert.equal(app.call('parseReceiptTotal', lines), 149.90)
+  assert.equal(app.call('parseGST', lines), 13.64)
 })
 
 test('infers only a plausible final date digit near the receipt date', () => {

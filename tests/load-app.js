@@ -35,9 +35,14 @@ function loadApp() {
       ]
     }
   }
+  const makeElement = () => ({
+    value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '',
+    classList: { add() {}, remove() {} },
+    removeAttribute(name) { delete this[name] }
+  })
   const document = {
     getElementById(id) {
-      if (!elements[id]) elements[id] = { value: '' }
+      if (!elements[id]) elements[id] = makeElement()
       return elements[id]
     }
   }
@@ -73,6 +78,9 @@ function loadApp() {
     },
     setHeicConverter(converter) {
       context.heic2any = converter
+    },
+    element(id) {
+      return elements[id] || (elements[id] = makeElement())
     }
   }
 }

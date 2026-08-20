@@ -1,0 +1,18 @@
+{
+  "raw": {
+    "confidence": 51,
+    "text": "Council Fee $35.00\nCartage $82.50\nLevy $18.76\nGST: $13.64\nTotal Price: $149.90\nThe Total Price Includes GST\nTotal Amount Tendered: $180.00"
+  },
+  "enhanced": {
+    "confidence": 56,
+    "text": "Council Fee $35.00\nCartage $82.50\nLevy $18.76\nGST $13.64\nTotal Price $149.90\nThe Total Price Includes GST\nAmount Tendered $180.00"
+  },
+  "binary": {
+    "confidence": 47,
+    "text": "Council Fee $35.00\nCartage $82.50\nLevy $18.76\nGST: $13.64\nTotaI Price: $149.90\nTotal Price Includes GST\nCash Tendered: $180.00"
+  },
+  "bottom crop": {
+    "confidence": 59,
+    "text": "GST $13.64\nTotal Price $149.90\nThe Total Price Includes GST\nTotal Amount Tendered $180.00"
+  }
+}

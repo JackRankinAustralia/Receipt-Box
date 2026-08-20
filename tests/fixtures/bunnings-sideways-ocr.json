@@ -1,0 +1,15 @@
+{
+  "note": "Reconstructed from the reported Bunnings result because the image and verbatim debug OCR were unavailable.",
+  "orientationProbes": {
+    "0": { "confidence": 51, "text": "BUNNINGS\ni i | 13.30\nrr n 10 05 03" },
+    "90": { "confidence": 48, "text": "BUNNINGS\nTAX INVOICE\nABN 26 008 672 179\n10/05/2003\nITEM $13.30\nTOTAL $104.14\nEFTPOS $104.14\nGST INCLUDED IN THE TOTAL $9.45" },
+    "180": { "confidence": 54, "text": "s 1 l\n30.31 | |\nnu ?" },
+    "270": { "confidence": 50, "text": "1 i i\nBUNN IN GS\n4.10 41" }
+  },
+  "ocr": {
+    "raw": { "confidence": 48, "text": "BUNNINGS\nTAX INVOICE\nABN 26 008 672 179\n10/05/2003\nTIMBER $13.30\nSUBTOTAL $104.14\nTOTAL $104.14\nGST INCLUDED IN THE TOTAL $9.45\nEFT $104.14\nCHANGE $0.00" },
+    "enhanced": { "confidence": 52, "text": "BUNNINGS\nTAX INVOICE\nABN 26 008 672 179\n10/05/2003\nTIMBER $13.30\nSUBTOTAL $104.14\nTOTAL $104.14\nGST INCLUDED IN THE TOTAL $9.45\nEFT $104.14\nCHANGE $0.00" },
+    "binary": { "confidence": 46, "text": "BUNNINGS\nTAX INVOICE\nABN 26 008 672 179\n10/05/2003\nTIMBER $13.30\nSUBTOTAL $104.14\nTOTAL $104.14\nGST INCLUDED IN THE TOTAL $9.45\nEFT $104.14\nCHANGE $0.00" },
+    "bottom crop": { "confidence": 57, "text": "TIMBER $13.30\nSUBTOTAL $104.14\nTOTAL $104.14\nGST INCLUDED IN THE TOTAL $9.45\nEFT $104.14\nCHANGE $0.00" }
+  }
+}
