@@ -33,5 +33,6 @@ test('records least-privilege grants, authenticated policies, and upload limits'
 
 test('keeps the original selected receipt file for storage', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
-  assert.match(html, /async function save\(\).*?const id=crypto\.randomUUID\(\),f=originalReceiptFile\(\)/s)
+  assert.match(html, /async function save\(options=\{\}\).*?f=originalReceiptFile\(\)/s)
+  assert.match(html, /storage\.from\('receipts'\)\.upload\(path,f\)/s)
 })

@@ -36,26 +36,32 @@ function loadApp() {
     }
   }
   const makeElement = () => ({
-    value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '',
-    classList: { add() {}, remove() {} },
+    value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '', disabled: false,
+    classList: { add() {}, remove() {}, contains() { return false } },
     removeAttribute(name) { delete this[name] }
   })
   const document = {
     getElementById(id) {
       if (!elements[id]) elements[id] = makeElement()
       return elements[id]
-    }
+    },
+    createElement() { return makeElement() },
+    querySelectorAll() { return [] }
   }
+  let confirmResult = true
   const context = vm.createContext({
     console,
     document,
-    window: {},
+    window: { location: {}, scrollTo() {}, open() {} },
     Intl,
     Date: FixedDate,
     Map,
     URL,
     Blob,
     File: globalThis.File,
+    crypto: { randomUUID: () => 'new-receipt-id' },
+    setTimeout() {},
+    confirm() { return confirmResult },
     alert(message) { throw new Error(message) }
   })
   vm.runInContext(appScript.slice(0, eventBindings), context, { filename: 'index.html' })
@@ -67,6 +73,14 @@ function loadApp() {
     setRows(rows) {
       context.__testRows = rows
       vm.runInContext('allRows = __testRows', context)
+    },
+    setBackend(backend, testUser = { id: 'test-user' }) {
+      context.__testBackend = backend
+      context.__testUser = testUser
+      vm.runInContext('sb = __testBackend; user = __testUser', context)
+    },
+    setConfirm(value) {
+      confirmResult = value
     },
     setPeriod(value) {
       const values = ['month', 'fy', 'lastfy', 'all']

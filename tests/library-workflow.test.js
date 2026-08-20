@@ -1,0 +1,158 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const { loadApp } = require('./load-app')
+
+function receipt(overrides = {}) {
+  return {
+    id: 'receipt-1', user_id: 'test-user', supplier: 'Alpha Supplies',
+    receipt_date: '2026-08-10', total: 25, gst: 2.27,
+    entity_name: 'AWTCO', category_name: 'Office Supplies',
+    project_name: 'Expo', notes: 'Original', file_path: 'test-user/receipt-1/image.jpg',
+    original_filename: 'image.jpg', mime_type: 'image/jpeg', ...overrides
+  }
+}
+
+function backend(initialRows = []) {
+  const rows = initialRows.map(row => ({ ...row }))
+  const calls = { inserts: [], updates: [], deletes: [], uploads: [], removes: [] }
+  const api = {
+    calls,
+    rows,
+    from() {
+      return {
+        select() { return { order: async () => ({ data: rows.map(row => ({ ...row })), error: null }) } },
+        async insert(payload) { calls.inserts.push({ ...payload }); rows.push({ ...payload }); return { error: null } },
+        update(payload) {
+          return { eq: async (_column, id) => {
+            calls.updates.push({ id, payload: { ...payload } })
+            const index = rows.findIndex(row => row.id === id)
+            if (index >= 0) rows[index] = { ...rows[index], ...payload }
+            return { error: null }
+          } }
+        },
+        delete() {
+          return { eq: async (_column, id) => {
+            calls.deletes.push(id)
+            const index = rows.findIndex(row => row.id === id)
+            if (index >= 0) rows.splice(index, 1)
+            return { error: null }
+          } }
+        }
+      }
+    },
+    storage: { from() { return {
+      async upload(path, file) { calls.uploads.push({ path, file }); return { error: null } },
+      async remove(paths) { calls.removes.push(paths); return { error: null } },
+      async createSignedUrl() { return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
+    } } }
+  }
+  return api
+}
+
+function fillForm(app, values = {}) {
+  const defaults = {
+    supplier: 'Corrected Supplier', date: '2026-08-17', amount: '88.40', gst: '8.04',
+    entity: 'AWTCO', category: 'Equipment', project: 'Showground', notes: 'Manually corrected after OCR'
+  }
+  for (const [id, value] of Object.entries({ ...defaults, ...values })) app.element(id).value = value
+}
+
+test('save preserves manual OCR corrections and keeps the saved receipt open for review', async () => {
+  const app = loadApp()
+  const db = backend()
+  app.setBackend(db)
+  fillForm(app)
+
+  const result = await app.call('save')
+
+  assert.equal(db.calls.inserts.length, 1)
+  assert.equal(db.calls.inserts[0].supplier, 'Corrected Supplier')
+  assert.equal(db.calls.inserts[0].total, 88.40)
+  assert.equal(db.calls.inserts[0].notes, 'Manually corrected after OCR')
+  assert.equal(result.id, 'new-receipt-id')
+  assert.equal(app.element('amount').value, '88.40')
+  assert.equal(app.element('saveBtn').dataset.edit, 'new-receipt-id')
+  assert.match(app.element('saveMsg').innerHTML, /Receipt saved/i)
+})
+
+test('Save & add another saves once then fully resets transient receipt state', async () => {
+  const app = loadApp()
+  const db = backend()
+  app.setBackend(db)
+  fillForm(app)
+  app.element('cameraFile').files = [new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })]
+  app.call('showPreview')
+  app.call('rotateReceiptPreview')
+  app.element('ocrStatus').textContent = 'OCR complete'
+  app.element('ocrDiagnosticsText').textContent = 'diagnostics'
+
+  const result = await app.call('saveAndAddAnother')
+
+  assert.equal(db.calls.inserts.length, 1)
+  assert.equal(db.calls.uploads.length, 1)
+  assert.equal(result.addAnother, true)
+  for (const id of ['supplier', 'amount', 'gst', 'project', 'notes', 'cameraFile', 'libraryFile']) assert.equal(app.element(id).value, '')
+  assert.equal(app.element('date').value, '2026-08-18')
+  assert.equal(app.element('entity').value, 'National Events')
+  assert.equal(app.element('category').value, 'Other')
+  assert.equal(app.element('previewFrame').style.display, 'none')
+  assert.equal(app.element('receiptPreview').style.transform, '')
+  assert.equal(app.element('ocrDiagnosticsText').textContent, '')
+  assert.match(app.element('ocrStatus').innerHTML, /Read receipt automatically/)
+  assert.match(app.element('saveMsg').innerHTML, /Ready for the next receipt/i)
+  assert.equal(db.rows.length, 1)
+})
+
+test('sorts, searches, and filters the receipt library without mutating source rows', () => {
+  const app = loadApp()
+  const rows = [
+    receipt({ id: 'b', supplier: 'Zulu Fuel', receipt_date: '2026-07-01', total: 90, entity_name: 'AWTCO', category_name: 'Fuel' }),
+    receipt({ id: 'a', supplier: 'Alpha Office', receipt_date: '2026-08-15', total: 20, entity_name: 'National Events', category_name: 'Office Supplies' }),
+    receipt({ id: 'c', supplier: 'Metro Hire', receipt_date: '2026-08-05', total: 55, entity_name: 'AWTCO', category_name: 'Equipment', project_name: 'Festival' })
+  ]
+  const ids = options => Array.from(app.call('filterAndSortReceipts', rows, options), row => row.id)
+  assert.deepEqual(ids({ sort: 'newest' }), ['a', 'c', 'b'])
+  assert.deepEqual(ids({ sort: 'oldest' }), ['b', 'c', 'a'])
+  assert.deepEqual(ids({ sort: 'supplier' }), ['a', 'c', 'b'])
+  assert.deepEqual(ids({ sort: 'highest' }), ['b', 'c', 'a'])
+  assert.deepEqual(ids({ sort: 'lowest' }), ['a', 'c', 'b'])
+  assert.deepEqual(ids({ query: 'festival', entity: 'AWTCO', dateFrom: '2026-08-01', dateTo: '2026-08-31' }), ['c'])
+  assert.deepEqual(rows.map(row => row.id), ['b', 'a', 'c'])
+})
+
+test('editing updates the existing receipt with every editable field and does not insert a duplicate', async () => {
+  const app = loadApp()
+  const db = backend([receipt()])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  app.call('editReceipt', 'receipt-1')
+  fillForm(app, { supplier: 'Updated Supplier', date: '2026-08-18', amount: '101.20', gst: '9.20', entity: 'Personal', category: 'Travel', project: 'Updated project', notes: 'Updated notes' })
+
+  await app.call('save')
+
+  assert.equal(db.calls.inserts.length, 0)
+  assert.equal(db.calls.updates.length, 1)
+  assert.equal(db.calls.updates[0].id, 'receipt-1')
+  assert.deepEqual(
+    Object.fromEntries(['supplier', 'receipt_date', 'total', 'gst', 'entity_name', 'category_name', 'project_name', 'notes'].map(key => [key, db.calls.updates[0].payload[key]])),
+    { supplier: 'Updated Supplier', receipt_date: '2026-08-18', total: 101.2, gst: 9.2, entity_name: 'Personal', category_name: 'Travel', project_name: 'Updated project', notes: 'Updated notes' }
+  )
+  assert.equal(db.rows.length, 1)
+})
+
+test('delete requires explicit confirmation and removes the stored attachment and row', async () => {
+  const app = loadApp()
+  const db = backend([receipt()])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  app.setConfirm(false)
+  await app.call('deleteReceipt', 'receipt-1')
+  assert.equal(db.calls.deletes.length, 0)
+
+  app.setConfirm(true)
+  const deleted = await app.call('deleteReceipt', 'receipt-1')
+  assert.equal(deleted, true)
+  assert.equal(JSON.stringify(db.calls.removes), JSON.stringify([['test-user/receipt-1/image.jpg']]))
+  assert.deepEqual(db.calls.deletes, ['receipt-1'])
+  assert.equal(db.rows.length, 0)
+})
