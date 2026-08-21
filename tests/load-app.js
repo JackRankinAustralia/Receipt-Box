@@ -52,6 +52,11 @@ function loadApp() {
     querySelectorAll() { return [] }
   }
   let confirmResult = true
+  const revokedObjectUrls = []
+  class TestURL extends URL {
+    static createObjectURL() { return 'blob:test-receipt-preview' }
+    static revokeObjectURL(value) { revokedObjectUrls.push(value) }
+  }
   const context = vm.createContext({
     console,
     document,
@@ -59,7 +64,7 @@ function loadApp() {
     Intl,
     Date: FixedDate,
     Map,
-    URL,
+    URL: TestURL,
     Blob,
     File: globalThis.File,
     crypto: { randomUUID: () => 'new-receipt-id' },
@@ -77,12 +82,20 @@ function loadApp() {
     },
     setRows(rows) {
       context.__testRows = rows
-      vm.runInContext('allRows = __testRows', context)
+      vm.runInContext('allRows = __testRows; receiptRows = __testRows', context)
     },
     setSettings(settings) {
       context.__testSettings = settings
       vm.runInContext('settingsData = __testSettings', context)
     },
+    setPreviewUrl(value) {
+      context.__testPreviewUrl = value
+      vm.runInContext('previewUrl = __testPreviewUrl', context)
+    },
+    state() {
+      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration })', context)
+    },
+    revokedObjectUrls,
     setBackend(backend, testUser = { id: 'test-user' }) {
       context.__testBackend = backend
       context.__testUser = testUser

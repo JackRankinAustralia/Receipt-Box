@@ -6,6 +6,7 @@ const path = require('node:path')
 const owner = '11111111-1111-4111-8111-111111111111'
 const other = '22222222-2222-4222-8222-222222222222'
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821090000_add_user_managed_dimensions.sql'), 'utf8')
+const indexMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821133000_add_composite_fk_indexes.sql'), 'utf8')
 
 async function driftedProductionShape(db) {
   await db.exec(`
@@ -40,6 +41,8 @@ test('migration dry-run reconciles production drift, enforces ownership, and rol
     const before = (await db.query('select supplier,entity_name,category_name,project_name from receipts order by supplier')).rows
     await db.exec(migration)
     await db.exec(migration)
+    await db.exec(indexMigration)
+    await db.exec(indexMigration)
 
     assert.deepEqual((await db.query('select count(*)::int receipts,count(entity_id)::int entity_links,count(category_id)::int category_links,count(project_id)::int project_links,count(*) filter(where user_id is null)::int ownerless from receipts')).rows[0],{receipts:6,entity_links:6,category_links:6,project_links:5,ownerless:0})
     assert.deepEqual((await db.query('select supplier,entity_name,category_name,project_name from receipts order by supplier')).rows,before)
@@ -58,6 +61,9 @@ test('migration dry-run reconciles production drift, enforces ownership, and rol
     const policies = (await db.query("select roles,cmd,with_check from pg_policies where tablename='entities'")).rows
     assert.ok(policies.every(row=>row.roles.includes('authenticated')))
     assert.ok(policies.find(row=>row.cmd==='UPDATE').with_check)
+    const foreignKeyIndexes = (await db.query("select indexname from pg_indexes where schemaname='public' and indexname in ('receipts_user_entity_idx','receipts_user_category_idx','receipts_user_project_idx','projects_user_entity_idx') order by indexname")).rows.map(row=>row.indexname)
+    assert.deepEqual(foreignKeyIndexes,['projects_user_entity_idx','receipts_user_category_idx','receipts_user_entity_idx','receipts_user_project_idx'])
+    assert.equal((await db.query("select count(*)::int redundant from pg_indexes where schemaname='public' and indexdef ~ '\\(user_id\\)$' and tablename='receipts'")).rows[0].redundant,0)
 
     await db.exec("create function fail_cleanup() returns trigger language plpgsql as $$begin raise exception 'simulated';end$$; create trigger fail_cleanup before delete on categories for each statement execute function fail_cleanup();")
     await assert.rejects(db.query('select public.delete_account_data($1)',[owner]),/simulated/)
