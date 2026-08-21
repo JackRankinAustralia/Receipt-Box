@@ -76,3 +76,30 @@ Remaining recommendations:
 - [Supabase Storage access control](https://supabase.com/docs/guides/storage/security/access-control)
 - [Supabase Storage ownership](https://supabase.com/docs/guides/storage/security/ownership)
 - [Supabase product security](https://supabase.com/docs/guides/security/product-security)
+
+## Account deletion token window (21 August 2026 review)
+
+Deleting a user and revoking sessions prevents refresh tokens from creating new
+sessions, but an access-token JWT already issued to that user remains
+cryptographically valid until its `exp` time. During that remaining window the
+current Storage insert policy could accept an upload under the deleted user's
+UUID folder. The deleted user cannot create a corresponding receipt row because
+`receipts.user_id` references `auth.users`, so the practical impact is limited
+to an orphaned Storage object and storage consumption rather than access to
+another user's data.
+
+Mitigation for the current architecture:
+
+- retain a conservative JWT expiry (Supabase recommends the usual one-hour
+  expiry for most applications and discourages values below five minutes);
+- keep account deletion responsible for enumerating and removing all objects
+  before deleting database/Auth data;
+- monitor for objects whose owner UUID no longer exists and remove them during
+  maintenance;
+- if immediate token revocation later becomes a strict requirement, validate
+  the JWT `session_id` against `auth.sessions` for sensitive Storage writes.
+
+Adding a privileged session-check helper to every Storage upload was judged
+disproportionate for this milestone because the residual token cannot recreate
+receipt ownership or read another user's objects. See
+[Supabase user sessions](https://supabase.com/docs/guides/auth/sessions).

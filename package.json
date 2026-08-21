@@ -3,5 +3,8 @@
   "private": true,
   "scripts": {
     "test": "node --test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.5"
   }
 }
