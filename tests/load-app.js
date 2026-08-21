@@ -39,7 +39,7 @@ function loadApp() {
     const classes = new Set()
     return {
       value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '', disabled: false,
-      classList: { add(...names) { names.forEach(name => classes.add(name)) }, remove(...names) { names.forEach(name => classes.delete(name)) }, contains(name) { return classes.has(name) } },
+      classList: { add(...names) { names.forEach(name => classes.add(name)) }, remove(...names) { names.forEach(name => classes.delete(name)) }, toggle(name, force) { const add = force === undefined ? !classes.has(name) : force; if (add) classes.add(name); else classes.delete(name); return add }, contains(name) { return classes.has(name) } },
       removeAttribute(name) { delete this[name] }
     }
   }
@@ -75,6 +75,8 @@ function loadApp() {
     alert() {}
   })
   vm.runInContext(appScript.slice(0, eventBindings), context, { filename: 'index.html' })
+  context.__testEntitlement = { plan: 'pro', ocr: { used: 0, limit: null, allowed: true }, capabilities: { run_ocr: true, create_entity: true, create_project: true, custom_categories: true, advanced_reports: true, export_csv: true, export_pdf: true } }
+  vm.runInContext('entitlementState = __testEntitlement', context)
 
   return {
     call(name, ...args) {
@@ -88,12 +90,25 @@ function loadApp() {
       context.__testSettings = settings
       vm.runInContext('settingsData = __testSettings', context)
     },
+    setEntitlementFixture(entitlement) {
+      context.__testEntitlement = entitlement
+      vm.runInContext('entitlementState = __testEntitlement; renderEntitlement()', context)
+    },
+    beginOCR(id) {
+      context.__testScanId = id
+      return vm.runInContext('entitlementService.beginOCR(__testScanId)', context)
+    },
+    completeOCR(id, meaningful) {
+      context.__testScanId = id
+      context.__testMeaningful = meaningful
+      return vm.runInContext('entitlementService.completeOCR(__testScanId,__testMeaningful)', context)
+    },
     setPreviewUrl(value) {
       context.__testPreviewUrl = value
       vm.runInContext('previewUrl = __testPreviewUrl', context)
     },
     state() {
-      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration })', context)
+      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration, entitlementState, ocrScanSessionId })', context)
     },
     revokedObjectUrls,
     setBackend(backend, testUser = { id: 'test-user' }) {
