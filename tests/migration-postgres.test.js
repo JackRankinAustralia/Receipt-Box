@@ -7,6 +7,7 @@ const owner = '11111111-1111-4111-8111-111111111111'
 const other = '22222222-2222-4222-8222-222222222222'
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821090000_add_user_managed_dimensions.sql'), 'utf8')
 const indexMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821133000_add_composite_fk_indexes.sql'), 'utf8')
+const entitlementMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821150000_add_free_pro_entitlements.sql'), 'utf8')
 
 async function driftedProductionShape(db) {
   await db.exec(`
@@ -43,12 +44,15 @@ test('migration dry-run reconciles production drift, enforces ownership, and rol
     await db.exec(migration)
     await db.exec(indexMigration)
     await db.exec(indexMigration)
+    await db.exec(entitlementMigration)
+    await db.exec(entitlementMigration)
 
     assert.deepEqual((await db.query('select count(*)::int receipts,count(entity_id)::int entity_links,count(category_id)::int category_links,count(project_id)::int project_links,count(*) filter(where user_id is null)::int ownerless from receipts')).rows[0],{receipts:6,entity_links:6,category_links:6,project_links:5,ownerless:0})
     assert.deepEqual((await db.query('select supplier,entity_name,category_name,project_name from receipts order by supplier')).rows,before)
     assert.deepEqual((await db.query('select (select count(*)::int from entities where user_id=$1) entities,(select count(*)::int from categories where user_id=$1) categories,(select count(*)::int from projects where user_id=$1) projects',[owner])).rows[0],{entities:3,categories:10,projects:5})
+    assert.deepEqual((await db.query('select count(*)::int total,count(*) filter(where is_grandfathered)::int grandfathered from entities where user_id=$1',[owner])).rows[0],{total:3,grandfathered:3})
 
-    const foreignEntity = (await db.query('insert into entities(user_id,name) values($1,$2) returning id',[other,'Other owner entity'])).rows[0].id
+    const foreignEntity = (await db.query('select id from entities where user_id=$1 limit 1',[other])).rows[0].id
     await assert.rejects(db.query('update receipts set entity_id=$1 where supplier=$2',[foreignEntity,'A']))
     await assert.rejects(db.query('update projects set entity_id=$1 where user_id=$2',[foreignEntity,owner]))
     await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${owner}',false)`)
