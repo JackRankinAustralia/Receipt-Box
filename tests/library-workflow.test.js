@@ -14,11 +14,21 @@ function receipt(overrides = {}) {
 
 function backend(initialRows = []) {
   const rows = initialRows.map(row => ({ ...row }))
+  const dimensions = {
+    entities: [{ id: 'entity-national', user_id: 'test-user', name: 'National Events', is_default: true, is_archived: false }, { id: 'entity-awtco', user_id: 'test-user', name: 'AWTCO', is_default: false, is_archived: false }, { id: 'entity-personal', user_id: 'test-user', name: 'Personal', is_default: false, is_archived: false }],
+    categories: [{ id: 'category-other', user_id: 'test-user', name: 'Other', is_default: true, is_archived: false }, { id: 'category-equipment', user_id: 'test-user', name: 'Equipment', is_default: false, is_archived: false }, { id: 'category-travel', user_id: 'test-user', name: 'Travel', is_default: false, is_archived: false }, { id: 'category-office', user_id: 'test-user', name: 'Office Supplies', is_default: false, is_archived: false }],
+    projects: [{ id: 'project-expo', user_id: 'test-user', name: 'Expo', is_default: false, is_archived: false }, { id: 'project-showground', user_id: 'test-user', name: 'Showground', is_default: false, is_archived: false }, { id: 'project-updated', user_id: 'test-user', name: 'Updated project', is_default: false, is_archived: false }]
+  }
   const calls = { inserts: [], updates: [], deletes: [], uploads: [], removes: [] }
   const api = {
     calls,
     rows,
-    from() {
+    from(table) {
+      if (dimensions[table]) return {
+        select() { return { order: async () => ({ data: dimensions[table].map(row => ({ ...row })), error: null }) } },
+        update(payload) { return { eq: async (_column, id) => { const row = dimensions[table].find(item => item.id === id); if (row) Object.assign(row, payload); return { error: null } } } },
+        delete() { return { eq: async (_column, id) => { const index = dimensions[table].findIndex(item => item.id === id); if (index >= 0) dimensions[table].splice(index, 1); return { error: null } } } }
+      }
       return {
         select() { return { order: async () => ({ data: rows.map(row => ({ ...row })), error: null }) } },
         async insert(payload) { calls.inserts.push({ ...payload }); rows.push({ ...payload }); return { error: null } },
@@ -61,6 +71,7 @@ test('save preserves manual OCR corrections and keeps the saved receipt open for
   const app = loadApp()
   const db = backend()
   app.setBackend(db)
+  await app.call('loadSettings')
   fillForm(app)
 
   const result = await app.call('save')
@@ -79,6 +90,7 @@ test('Save & add another saves once then fully resets transient receipt state', 
   const app = loadApp()
   const db = backend()
   app.setBackend(db)
+  await app.call('loadSettings')
   fillForm(app)
   app.element('cameraFile').files = [new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })]
   app.call('showPreview')
@@ -125,6 +137,7 @@ test('editing updates the existing receipt with every editable field and does no
   const db = backend([receipt()])
   app.setBackend(db)
   app.setRows(db.rows)
+  await app.call('loadSettings')
   app.call('editReceipt', 'receipt-1')
   fillForm(app, { supplier: 'Updated Supplier', date: '2026-08-18', amount: '101.20', gst: '9.20', entity: 'Personal', category: 'Travel', project: 'Updated project', notes: 'Updated notes' })
 

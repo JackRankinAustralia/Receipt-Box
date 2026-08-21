@@ -35,11 +35,14 @@ function loadApp() {
       ]
     }
   }
-  const makeElement = () => ({
-    value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '', disabled: false,
-    classList: { add() {}, remove() {}, contains() { return false } },
-    removeAttribute(name) { delete this[name] }
-  })
+  const makeElement = () => {
+    const classes = new Set()
+    return {
+      value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '', disabled: false,
+      classList: { add(...names) { names.forEach(name => classes.add(name)) }, remove(...names) { names.forEach(name => classes.delete(name)) }, contains(name) { return classes.has(name) } },
+      removeAttribute(name) { delete this[name] }
+    }
+  }
   const document = {
     getElementById(id) {
       if (!elements[id]) elements[id] = makeElement()
@@ -62,7 +65,9 @@ function loadApp() {
     crypto: { randomUUID: () => 'new-receipt-id' },
     setTimeout() {},
     confirm() { return confirmResult },
-    alert(message) { throw new Error(message) }
+    prompt() { return null },
+    location: { origin: 'https://example.test', pathname: '/' },
+    alert() {}
   })
   vm.runInContext(appScript.slice(0, eventBindings), context, { filename: 'index.html' })
 
@@ -73,6 +78,10 @@ function loadApp() {
     setRows(rows) {
       context.__testRows = rows
       vm.runInContext('allRows = __testRows', context)
+    },
+    setSettings(settings) {
+      context.__testSettings = settings
+      vm.runInContext('settingsData = __testSettings', context)
     },
     setBackend(backend, testUser = { id: 'test-user' }) {
       context.__testBackend = backend

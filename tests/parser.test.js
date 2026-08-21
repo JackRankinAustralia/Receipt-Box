@@ -184,6 +184,11 @@ test('preview container clips rotated portrait and landscape images above contro
 
 test('clears the receipt form without touching stored receipt rows', () => {
   const app = loadApp()
+  app.setSettings({
+    entities: [{ id: 'entity-national', name: 'National Events', is_default: true, is_archived: false }],
+    categories: [{ id: 'category-other', name: 'Other', is_default: true, is_archived: false }],
+    projects: []
+  })
   const savedRows = [{ id: 'saved-receipt', supplier: 'Bunnings', total: 104.14 }]
   app.setRows(savedRows)
   for (const [id, value] of Object.entries({ supplier: 'Bunnings', date: '2023-05-10', amount: '104.14', gst: '9.47', entity: 'Personal', category: 'Repairs & Maintenance', project: 'Shed', notes: 'Keep me' })) app.element(id).value = value
