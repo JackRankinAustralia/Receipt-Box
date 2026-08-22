@@ -4,6 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821150000_add_free_pro_entitlements.sql'), 'utf8')
+const quotaMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260822100000_reduce_free_ocr_limit_to_10.sql'), 'utf8')
 const owner = '11111111-1111-4111-8111-111111111111'
 const newcomer = '33333333-3333-4333-8333-333333333333'
 
@@ -28,6 +29,7 @@ async function entitlementSchema(db) {
     insert into categories(user_id,name) values ('${owner}','Historical Custom');
   `)
   await db.exec(migration)
+  await db.exec(quotaMigration)
 }
 
 async function asUser(db, userId) {
@@ -63,19 +65,19 @@ test('Free entitlements enforce atomic OCR admission and successful-session acco
     const rerun = (await db.query('select public.begin_ocr_scan($1) value',[failedId])).rows[0].value
     assert.equal(rerun.already_counted, true)
 
-    for (let i=2;i<=24;i++) {
+    for (let i=2;i<=9;i++) {
       const id = `00000000-0000-4000-8000-${String(i).padStart(12,'0')}`
       assert.equal((await db.query('select public.begin_ocr_scan($1) value',[id])).rows[0].value.allowed, true)
       await db.query('select public.complete_ocr_scan($1,true)',[id])
     }
-    const boundaryIds = ['00000000-0000-4000-8000-000000000025','00000000-0000-4000-8000-000000000026']
+    const boundaryIds = ['00000000-0000-4000-8000-000000000010','00000000-0000-4000-8000-000000000011']
     const boundary = await Promise.all(boundaryIds.map(id=>db.query('select public.begin_ocr_scan($1) value',[id])))
     assert.equal(boundary.filter(result=>result.rows[0].value.allowed).length, 1)
     assert.equal(boundary.filter(result=>!result.rows[0].value.allowed).length, 1)
     const admitted = boundary.find(result=>result.rows[0].value.allowed)
     const admittedId = boundaryIds[boundary.indexOf(admitted)]
     await db.query('select public.complete_ocr_scan($1,true)',[admittedId])
-    assert.equal((await db.query('select public.get_my_entitlement() value')).rows[0].value.ocr.used, 25)
+    assert.equal((await db.query('select public.get_my_entitlement() value')).rows[0].value.ocr.used, 10)
 
     await assert.rejects(db.query("update user_entitlements set plan='pro' where user_id=$1",[newcomer]))
     await assert.rejects(db.query("update ocr_scan_sessions set status='failed' where user_id=$1",[newcomer]))
@@ -100,13 +102,13 @@ test('expired reservations cannot be completed late to exceed the Free quota', a
     await entitlementSchema(db)
     await db.query('insert into auth.users(id) values($1)',[newcomer])
     await asUser(db,newcomer)
-    for(let i=1;i<=24;i++){
+    for(let i=1;i<=9;i++){
       const id=`10000000-0000-4000-8000-${String(i).padStart(12,'0')}`
       assert.equal((await db.query('select public.begin_ocr_scan($1) value',[id])).rows[0].value.allowed,true)
       await db.query('select public.complete_ocr_scan($1,true)',[id])
     }
-    const expiredId='10000000-0000-4000-8000-000000000025'
-    const replacementId='10000000-0000-4000-8000-000000000026'
+    const expiredId='10000000-0000-4000-8000-000000000010'
+    const replacementId='10000000-0000-4000-8000-000000000011'
     assert.equal((await db.query('select public.begin_ocr_scan($1) value',[expiredId])).rows[0].value.allowed,true)
     assert.equal((await db.query('select public.begin_ocr_scan($1) value',[replacementId])).rows[0].value.allowed,false)
 
@@ -119,7 +121,7 @@ test('expired reservations cannot be completed late to exceed the Free quota', a
     assert.equal(late.requires_readmission,true)
     assert.equal(late.reason,'failed_session')
     await db.query('select public.complete_ocr_scan($1,true)',[replacementId])
-    assert.equal((await db.query("select count(*)::int count from ocr_scan_sessions where user_id=$1 and month_start=date_trunc('month',now() at time zone 'UTC')::date and status='succeeded'",[newcomer])).rows[0].count,25)
+    assert.equal((await db.query("select count(*)::int count from ocr_scan_sessions where user_id=$1 and month_start=date_trunc('month',now() at time zone 'UTC')::date and status='succeeded'",[newcomer])).rows[0].count,10)
   } finally { await db.close() }
 })
 

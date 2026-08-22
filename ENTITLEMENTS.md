@@ -6,7 +6,7 @@ The database is authoritative for plans, feature capabilities, and monthly OCR a
 
 A newly selected receipt photo creates one opaque OCR session ID. The session consumes one scan only after the OCR pipeline completes and presents at least one meaningful receipt field: Supplier, Date, Total, or GST. A technical failure or a result with none of those fields marks the reservation failed and does not consume quota. Reruns for the same selected receipt reuse the session ID, so a session that has already succeeded is not counted twice.
 
-The monthly boundary is the first day of each calendar month in UTC. `begin_ocr_scan()` serialises admissions per user with a transaction-scoped advisory lock and counts both pending reservations and completed scans. This prevents concurrent tabs from collectively passing the 25-scan Free limit.
+The monthly boundary is the first day of each calendar month in UTC. `begin_ocr_scan()` serialises admissions per user with a transaction-scoped advisory lock and counts both pending reservations and completed scans. This prevents concurrent tabs from collectively passing the 10-scan Free limit.
 
 ## Trust boundary
 

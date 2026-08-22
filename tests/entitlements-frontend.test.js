@@ -6,21 +6,22 @@ const { loadApp } = require('./load-app')
 
 const free = (overrides={}) => ({
   plan: 'free',
-  ocr: { used: 0, limit: 25, allowed: true },
+  ocr: { used: 0, limit: 10, allowed: true },
   capabilities: { run_ocr: true, create_entity: false, create_project: true, custom_categories: false, advanced_reports: false, export_csv: false, export_pdf: false },
   ...overrides
 })
 
 test('central entitlement service exposes Free usage and locked report/export states', () => {
   const app = loadApp()
-  app.setEntitlementFixture(free({ocr:{used:18,limit:25,allowed:true}}))
-  assert.match(app.element('accountMsg').innerHTML,/18 of 25 OCR scans used/)
+  app.setEntitlementFixture(free({ocr:{used:8,limit:10,allowed:true}}))
+  assert.match(app.element('accountMsg').innerHTML,/8 of 10 OCR scans used/)
   assert.equal(app.element('advancedReportsLock').classList.contains('hidden'),false)
   app.call('exportReportCSV')
   assert.equal(app.element('detailTitle').textContent,'Receipt Box Pro')
   assert.match(app.element('detailBody').innerHTML,/A\$3\.99/)
   assert.match(app.element('detailBody').innerHTML,/A\$29\.99/)
   assert.match(app.element('detailBody').innerHTML,/Coming Soon/)
+  assert.match(app.element('detailBody').innerHTML,/10-scan monthly Free allowance/)
 })
 
 test('Free creation checks use the central service while existing values remain available', async () => {
@@ -83,4 +84,13 @@ test('migration keeps entitlement mutation server-only and documents client OCR 
   assert.match(sql,/pg_advisory_xact_lock/)
   assert.match(sql,/status in \('started','succeeded'\)/)
   assert.match(sql,/has_meaningful_fields/)
+})
+
+test('forward quota migration only replaces the three quota RPCs', () => {
+  const sql=fs.readFileSync(path.join(__dirname,'..','supabase','migrations','20260822100000_reduce_free_ocr_limit_to_10.sql'),'utf8')
+  assert.equal((sql.match(/create or replace function public\.(?:get_my_entitlement|begin_ocr_scan|complete_ocr_scan)/gi)||[]).length,3)
+  assert.doesNotMatch(sql,/\b(?:create|alter|drop)\s+table\b|\b(?:create|drop)\s+trigger\b/i)
+  assert.match(sql,/reserved_count>=10/)
+  assert.match(sql,/used_count<10/)
+  assert.doesNotMatch(sql,/reserved_count>=25|used_count<25/)
 })
