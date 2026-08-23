@@ -33,16 +33,34 @@ test('uses Australian July-to-June financial-year boundaries', () => {
   assert.deepEqual(ids(app.call('reportPeriodRows')), boundaryRows.map(row => row.id))
 })
 
-test('calculates totals, averages, and category/entity groups', () => {
+test('uses inclusive custom date boundaries and report filters', () => {
+  const app = loadApp()
+  app.setRows([
+    { id: 'before', receipt_date: '2026-07-31', entity_name: 'AWTCO', category_name: 'Fuel', project_name: 'Expo' },
+    { id: 'first', receipt_date: '2026-08-01', entity_name: 'AWTCO', category_name: 'Fuel', project_name: 'Expo' },
+    { id: 'other', receipt_date: '2026-08-10', entity_name: 'Personal', category_name: 'Fuel', project_name: 'Expo' },
+    { id: 'last', receipt_date: '2026-08-31', entity_name: 'AWTCO', category_name: 'Fuel', project_name: 'Expo' },
+    { id: 'after', receipt_date: '2026-09-01', entity_name: 'AWTCO', category_name: 'Fuel', project_name: 'Expo' }
+  ])
+  app.setPeriod('custom')
+  app.element('reportDateFrom').value = '2026-08-01'
+  app.element('reportDateTo').value = '2026-08-31'
+  assert.deepEqual(ids(app.call('reportPeriodRows')), ['first', 'other', 'last'])
+  app.element('reportEntity').value = 'AWTCO'
+  assert.deepEqual(ids(app.call('reportPeriodRows')), ['first', 'last'])
+  app.element('reportDateFrom').value = '2026-09-01'
+  app.element('reportDateTo').value = '2026-08-01'
+  assert.deepEqual(ids(app.call('reportPeriodRows')), [])
+})
+
+test('calculates totals, averages, and entity/category/project/month groups', () => {
   const app = loadApp()
   const rows = [
-    { total: 110, gst: 10, category_name: 'Fuel', entity_name: 'AWTCO' },
-    { total: 55, gst: 5, category_name: 'Fuel', entity_name: 'National Events' },
-    { total: 220, gst: 20, category_name: 'Software', entity_name: 'AWTCO' }
+    { receipt_date: '2026-07-01', total: 110, gst: 10, category_name: 'Fuel', entity_name: 'AWTCO', project_name: 'Expo' },
+    { receipt_date: '2026-08-01', total: 55, gst: 5, category_name: 'Fuel', entity_name: 'National Events', project_name: 'Expo' },
+    { receipt_date: '2026-08-02', total: 220, gst: 20, category_name: 'Software', entity_name: 'AWTCO', project_name: '' }
   ]
-  assert.equal(app.call('sumRows', rows, 'total'), 385)
-  assert.equal(app.call('sumRows', rows, 'gst'), 35)
-  assert.equal(app.call('sumRows', rows, 'total') / rows.length, 385 / 3)
+  assert.deepEqual(JSON.parse(JSON.stringify(app.call('reportMetrics', rows))), { total: 385, gst: 35, count: 3, average: 385 / 3 })
   assert.deepEqual(JSON.parse(JSON.stringify(app.call('groupedReport', rows, 'category_name'))), [
     { name: 'Software', total: 220, count: 1 },
     { name: 'Fuel', total: 165, count: 2 }
@@ -51,6 +69,27 @@ test('calculates totals, averages, and category/entity groups', () => {
     { name: 'AWTCO', total: 330, count: 2 },
     { name: 'National Events', total: 55, count: 1 }
   ])
+  assert.deepEqual(JSON.parse(JSON.stringify(app.call('groupedReport', rows, 'project_name', 'No project'))), [
+    { name: 'No project', total: 220, count: 1 },
+    { name: 'Expo', total: 165, count: 2 }
+  ])
+  assert.deepEqual(JSON.parse(JSON.stringify(app.call('monthlyReportGroups', rows))), [
+    { key: '2026-07', name: 'July 2026', total: 110, count: 1 },
+    { key: '2026-08', name: 'August 2026', total: 275, count: 2 }
+  ])
+})
+
+test('drill-down returns only receipts contributing to the selected group', () => {
+  const app = loadApp()
+  const rows = [
+    { id: 'fuel-july', receipt_date: '2026-07-05', category_name: 'Fuel', entity_name: 'AWTCO', project_name: 'Expo' },
+    { id: 'fuel-august', receipt_date: '2026-08-05', category_name: 'Fuel', entity_name: 'Personal', project_name: '' },
+    { id: 'office', receipt_date: '2026-08-06', category_name: 'Office', entity_name: 'AWTCO', project_name: 'Expo' }
+  ]
+  assert.deepEqual(ids(app.call('reportDrillRows', 'category', 'Fuel', rows)), ['fuel-july', 'fuel-august'])
+  assert.deepEqual(ids(app.call('reportDrillRows', 'entity', 'AWTCO', rows)), ['fuel-july', 'office'])
+  assert.deepEqual(ids(app.call('reportDrillRows', 'project', 'No project', rows)), ['fuel-august'])
+  assert.deepEqual(ids(app.call('reportDrillRows', 'month', '2026-08', rows)), ['fuel-august', 'office'])
 })
 
 test('builds CSV report data for the selected period with escaped text', () => {
@@ -58,12 +97,14 @@ test('builds CSV report data for the selected period with escaped text', () => {
   app.setPeriod('all')
   app.setRows([{
     receipt_date: '2026-08-02', supplier: 'Smith "Office"', total: 44, gst: 4,
-    entity_name: 'AWTCO', category_name: 'Office Supplies', project_name: 'Expo', notes: 'Paper, pens'
+    entity_name: 'AWTCO', category_name: 'Office Supplies', project_name: 'Expo', notes: 'Paper, pens', file_path: 'user/receipt/paper.pdf'
   }])
   const csv = app.call('buildReportCSV')
-  assert.match(csv, /^"Date","Supplier","Total","GST","Entity","Category","Project","Notes"/)
+  assert.match(csv, /^"Date","Supplier","Total","GST","Entity","Category","Project","Notes","Attachment present","Attachment filename"/)
   assert.match(csv, /"Smith ""Office"""/)
   assert.match(csv, /"Paper, pens"/)
+  assert.match(csv, /"Yes","paper.pdf"/)
+  assert.equal(app.call('reportFilename', 'csv'), 'Receipt-Box-All-Time.csv')
 })
 
 test('neutralises spreadsheet formulas in every CSV value', () => {
@@ -84,12 +125,15 @@ test('neutralises spreadsheet formulas in every CSV value', () => {
   assert.match(csv, /"'@malicious"/)
 })
 
-test('passes selected-period metrics, summaries, and receipts to the PDF report', () => {
+test('passes selected-period metrics, summaries, projects, and receipts to the PDF report', () => {
   const app = loadApp()
-  app.setPeriod('all')
+  app.setPeriod('custom')
+  app.element('reportDateFrom').value = '2026-08-01'
+  app.element('reportDateTo').value = '2026-08-31'
   app.setRows([
-    { receipt_date: '2026-08-01', supplier: 'Ampol', total: 110, gst: 10, category_name: 'Fuel', entity_name: 'AWTCO' },
-    { receipt_date: '2026-08-02', supplier: 'Adobe', total: 220, gst: 20, category_name: 'Software', entity_name: 'National Events' }
+    { receipt_date: '2026-07-31', supplier: 'Excluded', total: 999, gst: 90, category_name: 'Other', entity_name: 'Personal', project_name: 'Old project' },
+    { receipt_date: '2026-08-01', supplier: 'Ampol', total: 110, gst: 10, category_name: 'Fuel', entity_name: 'AWTCO', project_name: 'A very long project name that must wrap safely' },
+    { receipt_date: '2026-08-02', supplier: 'Adobe', total: 220, gst: 20, category_name: 'Software', entity_name: 'National Events', project_name: '' }
   ])
 
   const state = { texts: [], tables: [], filename: null }
@@ -115,15 +159,30 @@ test('passes selected-period metrics, summaries, and receipts to the PDF report'
   app.setPDFConstructor(FakePDF)
   app.call('exportReportPDF')
 
-  assert.equal(state.filename, 'receipt-box-all-report.pdf')
+  assert.equal(state.filename, 'Receipt-Box-2026-08-01-to-2026-08-31.pdf')
   assert.ok(state.texts.includes('$330.00'))
   assert.ok(state.texts.includes('$30.00'))
   assert.ok(state.texts.includes('2'))
   assert.ok(state.texts.includes('$165.00'))
   const plain = value => JSON.parse(JSON.stringify(value))
-  assert.deepEqual(plain(state.tables[0].head), [['Category', 'Receipts', 'Total']])
-  assert.deepEqual(plain(state.tables[1].head), [['Entity', 'Receipts', 'Total']])
-  assert.deepEqual(plain(state.tables[2].head), [['Date', 'Supplier', 'Category', 'Entity', 'GST', 'Total']])
-  assert.equal(state.tables[2].body.length, 2)
-  assert.deepEqual(plain(state.tables[2].body[0]), ['2026-08-01', 'Ampol', 'Fuel', 'AWTCO', '$10.00', '$110.00'])
+  assert.deepEqual(plain(state.tables[0].head), [['Entity', 'Receipts', 'Total']])
+  assert.deepEqual(plain(state.tables[1].head), [['Category', 'Receipts', 'Total']])
+  assert.deepEqual(plain(state.tables[2].head), [['Project', 'Receipts', 'Total']])
+  assert.deepEqual(plain(state.tables[3].head), [['Date', 'Supplier', 'Entity', 'Category', 'Project', 'GST', 'Total']])
+  assert.equal(state.tables[3].body.length, 2)
+  assert.equal(state.tables[3].body.some(row => row.includes('Excluded')), false)
+  assert.deepEqual(plain(state.tables[3].body[0]), ['2026-08-01', 'Ampol', 'AWTCO', 'Fuel', 'A very long project name that must wrap safely', '$10.00', '$110.00'])
+  assert.equal(state.tables[3].showHead, 'everyPage')
+  assert.equal(Object.values(state.tables[3].columnStyles).reduce((sum, column) => sum + column.cellWidth, 0), 182)
+  assert.equal(state.tables[3].styles.overflow, 'linebreak')
+})
+
+test('uses clear financial-year and custom-range export filenames', () => {
+  const app = loadApp()
+  app.setPeriod('fy')
+  assert.equal(app.call('reportFilename', 'csv'), 'Receipt-Box-FY2026-27.csv')
+  app.setPeriod('custom')
+  app.element('reportDateFrom').value = '2026-08-01'
+  app.element('reportDateTo').value = '2026-08-31'
+  assert.equal(app.call('reportFilename', 'pdf'), 'Receipt-Box-2026-08-01-to-2026-08-31.pdf')
 })

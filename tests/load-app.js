@@ -31,6 +31,7 @@ function loadApp() {
         { text: 'This month' },
         { text: 'This financial year' },
         { text: 'Last financial year' },
+        { text: 'Custom date range' },
         { text: 'All time' }
       ]
     }
@@ -120,7 +121,7 @@ function loadApp() {
       confirmResult = value
     },
     setPeriod(value) {
-      const values = ['month', 'fy', 'lastfy', 'all']
+      const values = ['month', 'fy', 'lastfy', 'custom', 'all']
       elements.reportPeriod.value = value
       elements.reportPeriod.selectedIndex = values.indexOf(value)
     },
