@@ -1,0 +1,27 @@
+{
+  "note": "Representative reconstructed OCR based on the reported visible receipt text. Verbatim production debug output was not available for these receipts.",
+  "australiaPost": {
+    "raw": { "confidence": 67, "text": "AUSTRALIA POST\nWODONGA VIC\nDate: 17 Nov 2025 14:08\nTOTAL $46.50\nEFTPOS $46.50" },
+    "enhanced": { "confidence": 71, "text": "AUSTRALIA POST\nTAX INVOICE\n17/11/2025 14:08\nTOTAL $46.50\nVISA $46.50" },
+    "binary": { "confidence": 61, "text": "AUSTRALIA POST\n17 NOV 2025\nTOTAL $46.50" },
+    "bottom crop": { "confidence": 58, "text": "TOTAL $46.50\nEFTPOS $46.50" }
+  },
+  "flatBunnings": {
+    "raw": { "confidence": 70, "text": "BUNNINGS WAREHOUSE\nTAX INVOICE\nSun 23/02/2025 10:43 AM\nHARDWARE ITEM $3.25\nTOTAL $3.25\nEFT $3.25" },
+    "enhanced": { "confidence": 73, "text": "BUNNINGS\nABN 26 008 672 179\nDate: 23 / 02 / 2025 10:43\nTOTAL $3.25\nCARD PAYMENT $3.25" },
+    "binary": { "confidence": 62, "text": "BUNNINGS\n23/02/2025\nTOTAL $3.25" },
+    "bottom crop": { "confidence": 66, "text": "TOTAL $3.25\nEFT $3.25\nGST INCLUDED IN TOTAL $0.30" }
+  },
+  "bpGlenrowan": {
+    "raw": { "confidence": 56, "text": "BP GLENROWAN\nTAX INVOICE\nDate: 18 / 08 / 2026 09:41\nUNLEADED 10.27 L x $1.949/L\nTOTAL $20.02\nGST $1.82\nVISA $20.02" },
+    "enhanced": { "confidence": 60, "text": "BP GLENROWAN\n18/08/2026 09:41\nQTY 10.27 L\nUNIT PRICE 1.949 / L\nTOTAL AUD 20.02\nCARD PAYMENT $20.02\nGST $1.82" },
+    "binary": { "confidence": 48, "text": "BP\n18/08/2026\n10.27L @ 1.949/L\nTOTAL $20.02\nEFTPOS $20.02" },
+    "bottom crop": { "confidence": 63, "text": "TOTAL $20.02\nGST $1.82\nVISA $20.02" }
+  },
+  "pearlEnergy": {
+    "raw": { "confidence": 51, "text": "PEARL ENERGY WODONGA\nTAX INVOICE\nMon 04 / 08 / 2026 14:22\nFUEL SALE\nTOTAL $75.73\nEFTPOS $75.73" },
+    "enhanced": { "confidence": 57, "text": "PEARL ENERGY\nWODONGA\nDate: 04/08/2026 14:22\nTOTAL AUD 75.73\nCARD $75.73" },
+    "binary": { "confidence": 46, "text": "PEARL ENERGY WODONGA\n04/08/2026\nTOTAL $75.73" },
+    "bottom crop": { "confidence": 54, "text": "TOTAL $75.73\nEFTPOS $75.73" }
+  }
+}

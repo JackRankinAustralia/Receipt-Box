@@ -10,6 +10,8 @@ const wizardOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'w
 // Reconstructed from the supplied cropped receipt text; verbatim OCR debug output was unavailable.
 const genericWasteOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'generic-waste-ocr.json'), 'utf8'))
 const bunningsSideways = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'bunnings-sideways-ocr.json'), 'utf8'))
+// Representative reconstructed OCR from the latest production receipt tests; not verbatim debug output.
+const latestProductionOCR = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'latest-production-receipts-ocr.json'), 'utf8'))
 
 test('recognises known suppliers and chooses a plausible unknown supplier', () => {
   const app = loadApp()
@@ -205,6 +207,229 @@ test('clears the receipt form without touching stored receipt rows', () => {
   assert.equal(app.element('saveBtn').textContent, 'Save receipt')
   assert.equal(app.element('saveBtn').dataset.edit, undefined)
   assert.deepEqual(savedRows, [{ id: 'saved-receipt', supplier: 'Bunnings', total: 104.14 }])
+})
+
+test('valid receipt selection enables OCR while clear, decode failure and stale loads keep it safe', async () => {
+  const app = loadApp()
+  const bunnings = new File([new Uint8Array([1])], 'Bunnings 2 IMG_3858.JPG', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [bunnings]
+
+  assert.equal(app.element('readBtn').disabled, false, 'test DOM starts before initial page binding')
+  app.call('syncReadButtonState')
+  assert.equal(app.element('readBtn').disabled, true)
+  assert.equal(await app.call('handleReceiptSelection', bunnings), true)
+  assert.equal(app.element('previewFrame').style.display, 'grid')
+  assert.match(app.element('ocrStatus').textContent, /Photo ready/i)
+  assert.equal(app.element('readBtn').disabled, false)
+
+  app.call('resetReceiptForm')
+  assert.equal(app.element('readBtn').disabled, true)
+
+  const broken = new File([new Uint8Array([2])], 'broken.HEIC', { type: 'image/heic' })
+  app.element('libraryFile').files = [broken]
+  app.setHeicConverter(async () => { throw new Error('decoder failed') })
+  assert.equal(await app.call('handleReceiptSelection', broken), false)
+  assert.equal(app.element('readBtn').disabled, true)
+  assert.match(app.element('ocrStatus').innerHTML, /could not be converted/i)
+
+  let finishOldDecode
+  const oldHeic = new File([new Uint8Array([3])], 'old.HEIC', { type: 'image/heic' })
+  app.setHeicConverter(() => new Promise(resolve => { finishOldDecode = resolve }))
+  app.element('libraryFile').files = [oldHeic]
+  const staleSelection = app.call('handleReceiptSelection', oldHeic)
+  assert.equal(app.element('readBtn').disabled, true)
+
+  const replacement = new File([new Uint8Array([4])], 'replacement.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [replacement]
+  assert.equal(await app.call('handleReceiptSelection', replacement), true)
+  assert.equal(app.element('readBtn').disabled, false)
+  finishOldDecode(new Blob([new Uint8Array([5])], { type: 'image/jpeg' }))
+  assert.equal(await staleSelection, false)
+  assert.equal(app.element('readBtn').disabled, false)
+  assert.match(app.element('fileName').textContent, /replacement\.jpg/)
+})
+
+test('selecting a new receipt clears prior Australia Post OCR fields before a failed BP date result', async () => {
+  const app = loadApp()
+  app.setSettings({
+    entities: [{ id: 'entity-personal', name: 'Personal', is_default: true, is_archived: false }],
+    categories: [{ id: 'category-other', name: 'Other', is_default: true, is_archived: false }],
+    projects: []
+  })
+  app.call('applyReceiptOCRResults', latestProductionOCR.australiaPost, { referenceDate: new Date('2026-08-18T12:00:00+10:00') })
+  assert.equal(app.element('supplier').value, 'Australia Post')
+  assert.equal(app.element('date').value, '2025-11-17')
+  assert.equal(app.element('amount').value, '46.50')
+
+  const nextReceipt = new File([new Uint8Array([1])], 'bp-next.jpg', { type: 'image/jpeg', lastModified: 1787000000000 })
+  app.element('cameraFile').files = [nextReceipt]
+  app.element('libraryFile').files = []
+  await app.call('handleReceiptSelection', nextReceipt)
+  assert.equal(app.element('supplier').value, '')
+  assert.equal(app.element('date').value, '2026-08-18')
+  assert.equal(app.element('amount').value, '')
+  assert.equal(app.element('gst').value, '')
+  assert.equal(app.element('category').value, 'Other')
+  assert.match(app.element('dateDetection').textContent, /OCR not run/i)
+  assert.equal(app.element('ocrDiagnostics').classList.contains('hidden'), true)
+
+  app.call('applyReceiptOCRResults', { raw: { confidence: 30, text: 'BP GLENROWAN\nUNLEADED\nTOTAL $20.02\nGST $1.82' } })
+  assert.equal(app.element('date').value, '2026-08-18')
+  assert.match(app.element('dateDetection').textContent, /not detected/i)
+  assert.notEqual(app.element('date').value, '2025-11-17')
+})
+
+test('latest reconstructed Australia Post and flat Bunnings controls remain correct', () => {
+  const app = loadApp()
+  const australiaPost = app.call('receiptFieldsFromOCR', latestProductionOCR.australiaPost, { referenceDate: new Date('2026-08-18T12:00:00+10:00') })
+  assert.equal(australiaPost.supplier.value, 'Australia Post')
+  assert.equal(australiaPost.date.value, '2025-11-17')
+  assert.equal(australiaPost.total.value, 46.50)
+
+  const bunnings = app.call('receiptFieldsFromOCR', latestProductionOCR.flatBunnings, { referenceDate: new Date('2026-08-18T12:00:00+10:00') })
+  assert.equal(bunnings.supplier.value, 'Bunnings')
+  assert.equal(bunnings.date.value, '2025-02-23')
+  assert.equal(bunnings.total.value, 3.25)
+  assert.equal(app.call('suggestCategory', latestProductionOCR.flatBunnings.raw.text, bunnings.supplier.value), 'Repairs & Maintenance')
+})
+
+test('BP fuel unit rates cannot outrank exact Total and card agreement', () => {
+  const app = loadApp()
+  const fields = app.call('receiptFieldsFromOCR', latestProductionOCR.bpGlenrowan, { referenceDate: new Date('2026-08-18T12:00:00+10:00') })
+  assert.equal(fields.supplier.value, 'BP')
+  assert.equal(fields.date.value, '2026-08-18')
+  assert.equal(fields.total.value, 20.02)
+  assert.equal(fields.gst.value, 1.82)
+  assert.match(fields.total.reason, /TOTAL/i)
+  assert.match(fields.total.reason, /payment/i)
+  assert.match(fields.total.reason, /decisive explicit TOTAL \+ payment agreement/i)
+  const rate = fields.candidates.totals.find(candidate => candidate.value < 2 && candidate.value > 1.9)
+  assert.ok(rate)
+  assert.ok(rate.score < fields.total.score)
+  assert.match(rate.reason, /unit\/rate exclusion/i)
+})
+
+test('strongly excluded GST and unit-rate candidates never populate Total by default', () => {
+  const app = loadApp()
+  const gstOnly = app.call('receiptFieldsFromOCR', {
+    raw: { confidence: 81, text: "APCO\n16-05-26\n17.050 @ $1.765/L\nTotal $.\nIncludes GST: $2.14" },
+    enhanced: { confidence: 79, text: 'APCO\nTotal $.\nIncludes GST: $2.14' }
+  }, { referenceDate: new Date('2026-08-23T12:00:00+10:00') })
+  assert.equal(gstOnly.total, null)
+  assert.equal(gstOnly.gst.value, 2.14)
+  assert.match(gstOnly.candidates.totals.find(candidate => candidate.value === 2.14).reason, /GST-labelled total exclusion/i)
+
+  const rateOnly = app.call('receiptFieldsFromOCR', { raw: { confidence: 70, text: 'FUEL\n17.050 @ $1.765/L' } })
+  assert.equal(rateOnly.total, null)
+})
+
+test('receipt-summary labels support PURCHASE, paid and due amounts', () => {
+  const app = loadApp()
+  for (const label of ['PURCHASE', 'AMOUNT PAID', 'AMOUNT DUE', 'BALANCE DUE']) {
+    const fields = app.call('receiptFieldsFromOCR', { raw: { confidence: 70, text: `TEST MERCHANT\n${label} $42.60` } })
+    assert.equal(fields.total.value, 42.60, label)
+  }
+})
+
+test('real Bunnings 2 damaged total is withheld when GST proves it cannot be the total', () => {
+  const app = loadApp()
+  const ocr = {
+    raw: { confidence: 53, text: 'BUNNINGS WODONGA\n7.1KW UNIT $1,699.00\n1 @ SubTotal: $1,699.00\nTotal $1,699.00\nGST INCLUDED IN THE TOTAL $172.64\nEFT $1,699.00' },
+    enhanced: { confidence: 65, text: 'BUNNINGS GROUP LIMITED\n7.1KW UNIT $1,699.00\nTotal $1,699.00\nGST INCLUDED IN THE TOTAL $172.64\nEFT $1,699.00' },
+    binary: { confidence: 62, text: 'BUNNINGS\nTotal $1,699.00\nGST INCLUDED IN THE TOTAL $172.64\nEFT $1,699.00' },
+    'bottom crop': { confidence: 62, text: 'GST INCLUDED IN THE TOTAL $172.64\nEFT $1,699.00' }
+  }
+  const fields = app.call('receiptFieldsFromOCR', ocr)
+  assert.equal(fields.total, null)
+  const damaged = fields.candidates.totals.find(candidate => candidate.value === 1699)
+  assert.ok(damaged)
+  assert.match(damaged.reason, /GST relationship conflict/i)
+  assert.match(damaged.reason, /unit\/rate context/i)
+})
+
+test('damaged GST spacing is normalised only beside a strong GST label', () => {
+  const app = loadApp()
+  for (const label of ['GST 1 31', 'GS 1 31', 'GST INCLUDED IN TOTAL\n1 31']) {
+    const fields = app.call('receiptFieldsFromOCR', { raw: { confidence: 45, text: `COLES\nTOTAL $73.22\n${label}` } })
+    assert.equal(fields.gst.value, 1.31, label)
+  }
+  assert.equal(app.call('receiptFieldsFromOCR', { raw: { confidence: 45, text: 'COLES\nTOTAL $73.22\naisle 1 31' } }).gst, null)
+})
+
+test('Bunnings footer references recover only validated embedded dates', () => {
+  const app = loadApp()
+  const valid = app.call('dateInfoFromText', 'BUNNINGS GROUP LIMITED\n$6975 R15 P6387 (194040 B015-17901-6975-2023 05-10', new Date('2026-08-23T12:00:00+10:00'))
+  assert.equal(valid.value, '2023-05-10')
+  assert.equal(valid.inferred, true)
+  assert.equal(valid.footerReference, true)
+  assert.equal(app.call('dateInfoFromText', 'UNKNOWN SHOP\n194040-17901-6975-2023 05-10', new Date('2026-08-23T12:00:00+10:00')), null)
+  assert.equal(app.call('dateInfoFromText', 'BUNNINGS\n194040-17901-2023 05-10-6975', new Date('2026-08-23T12:00:00+10:00')), null)
+})
+
+test('merchant profiles let distinctive names and ABNs outrank generic headers', () => {
+  const app = loadApp()
+  assert.equal(app.call('supplierFromLines', ['SUPERMARKET', 'APCO Wodonga'], 'SUPERMARKET\nAPCO Wodonga'), 'APCO')
+  assert.equal(app.call('supplierFromLines', ['SUPERMARKET', 'ABN 75 634 206 170'], 'SUPERMARKET\nABN 75 634 206 170'), 'APCO')
+  assert.notEqual(app.call('supplierFromLines', ['OTHER SHOP', '75 634', '206 170'], 'OTHER SHOP\n75 634\n206 170'), 'APCO')
+  assert.equal(app.call('supplierFromLines', ['SUPERMARKET', 'WAREHOUSE'], 'SUPERMARKET\nWAREHOUSE'), null)
+})
+
+test('very low-confidence OCR returns blank fields and a retry state', () => {
+  const app = loadApp()
+  const fields = app.call('receiptFieldsFromOCR', { raw: { confidence: 19, text: 'SUPERMARKET\nT0T 8.3\nGST 1 31' }, enhanced: { confidence: 21, text: 'WAREHOUSE\n13.30' } })
+  assert.equal(fields.lowQuality, true)
+  assert.equal(fields.supplier, null)
+  assert.equal(fields.total, null)
+  assert.equal(fields.gst, null)
+
+  const readable = app.call('receiptFieldsFromOCR', { raw: { confidence: 20, text: 'BP\nDATE 18/08/2026\nTOTAL $20.02\nVISA $20.02\nGST $1.82' } })
+  assert.equal(readable.lowQuality, false)
+  assert.equal(readable.supplier.value, 'BP')
+  assert.equal(readable.total.value, 20.02)
+})
+
+test('fuel quantity multiplication corroborates but never manufactures a total', () => {
+  const app = loadApp()
+  const supported = app.call('receiptFieldsFromOCR', { raw: { confidence: 70, text: 'BP\n17.050 @ $1.174/L\nTOTAL $20.02\nVISA $20.02' } })
+  assert.equal(supported.total.value, 20.02)
+  assert.match(supported.total.reason, /litres × unit-rate corroboration/i)
+  const missing = app.call('receiptFieldsFromOCR', { raw: { confidence: 70, text: 'BP\n17.050 @ $1.174/L\nTOTAL $.' } })
+  assert.equal(missing.total, null)
+})
+
+test('reconstructed Pearl Energy receipt resolves supplier, contextual date and cents', () => {
+  const app = loadApp()
+  const fields = app.call('receiptFieldsFromOCR', latestProductionOCR.pearlEnergy, { referenceDate: new Date('2026-08-18T12:00:00+10:00') })
+  assert.match(fields.supplier.value, /^PEARL ENERGY(?: WODONGA)?$/i)
+  assert.equal(fields.date.value, '2026-08-04')
+  assert.equal(fields.total.value, 75.73)
+  assert.match(fields.total.reason, /payment/i)
+})
+
+test('contextual date recovery tolerates OCR-damaged Australian dates only on receipt context lines', () => {
+  const app = loadApp()
+  const info = app.call('dateInfoFromText', 'PEARL ENERGY\nMon Date: 04 / O8 / 2026 14:22\nTOTAL $75.73', new Date('2026-08-18T12:00:00+10:00'))
+  assert.equal(info.value, '2026-08-04')
+  assert.equal(info.inferred, true)
+  assert.equal(app.call('dateInfoFromText', 'product 04 O8 2026 $14.22', new Date('2026-08-18T12:00:00+10:00')), null)
+})
+
+test('receipt-body bounds reduce background while retaining header and footer margins', () => {
+  const app = loadApp(), width = 120, height = 200, pixels = new Uint8ClampedArray(width * height * 4)
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const i = (y * width + x) * 4, receipt = x >= 20 && x <= 100 && y >= 10 && y <= 185, value = receipt ? 245 : 35
+    pixels[i] = pixels[i + 1] = pixels[i + 2] = value
+    pixels[i + 3] = 255
+  }
+  const bounds = app.call('receiptBodyBoundsFromPixels', pixels, width, height)
+  assert.equal(bounds.cropped, true)
+  assert.ok(bounds.x <= 20)
+  assert.ok(bounds.y <= 10)
+  assert.ok(bounds.x + bounds.width >= 100)
+  assert.ok(bounds.y + bounds.height >= 195)
+
+  const flat = new Uint8ClampedArray(width * height * 4).fill(255)
+  assert.deepEqual(JSON.parse(JSON.stringify(app.call('receiptBodyBoundsFromPixels', flat, width, height))), { x: 0, y: 0, width, height, cropped: false })
 })
 
 test('builds field-level consensus from Coles raw, enhanced, binary, and bottom OCR', () => {
