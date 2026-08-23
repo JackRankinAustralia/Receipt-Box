@@ -154,6 +154,32 @@ test('applies Bunnings consensus through the same result path used by automatic 
   assert.match(app.element('dateDetection').textContent, /inferred/i)
 })
 
+test('production smoke checks the receipt amount input and reports only applied safe totals', () => {
+  const app = loadApp()
+  app.element('total').textContent = '$999.00'
+
+  const applied = app.call('applyReceiptOCRResults', bunningsSideways.ocr, {
+    referenceDate: new Date('2026-08-18T12:00:00+10:00')
+  })
+  assert.equal(app.element('amount').value, '104.14')
+  assert.equal(app.element('total').textContent, '$999.00', '#total is the independent financial-year summary')
+  assert.ok(applied.filled.includes('total'))
+  assert.match(`Found ${applied.filled.join(', ')}`, /\btotal\b/)
+
+  app.element('amount').value = ''
+  const rejected = app.call('applyReceiptOCRResults', {
+    raw: { confidence: 70, text: 'TEST MERCHANT\nGST $9.45\nITEM $13.30' }
+  })
+  assert.equal(app.element('amount').value, '')
+  assert.equal(rejected.fields.total, null)
+  assert.equal(rejected.filled.includes('total'), false)
+  assert.doesNotMatch(`Found ${rejected.filled.join(', ')}`, /\btotal\b/)
+
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /if\(total!=null\)\{\$\('amount'\)\.value=total\.toFixed\(2\);filled\.push\('total'\)\}/)
+  assert.match(html, /Found '\+filled\.join\(', '\)/)
+})
+
 test('reads the exact Bunnings date text as 2023 rather than 2003', () => {
   const app = loadApp()
   const info = app.call('dateInfoFromText', 'BUNNINGS TAX INVOICE ABN 26 008 672 179 Date 10/05/2023 TOTAL GST EFT', new Date('2026-08-18T12:00:00+10:00'))
