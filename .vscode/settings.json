@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^node --check <\\(node -e \"const fs=require\\('fs'\\);const h=fs\\.readFileSync\\('index\\.html','utf8'\\);const s=\\[\\.\\.\\.h\\.matchAll\\(/<script\\(\\?: \\[\\^>\\]\\*\\)\\?>\\(\\[\\\\\\\\s\\\\\\\\S\\]\\*\\?\\)<\\\\\\\\/script>/g\\)\\]\\.map\\(m=>m\\[1\\]\\)\\.filter\\(Boolean\\)\\.at\\(-1\\);process\\.stdout\\.write\\(s\\)\"\\)$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "npm install": true
+    }
+}

@@ -10,7 +10,6 @@ test('pins every CDN script with SHA-384 integrity and anonymous CORS', () => {
 
   assert.deepEqual(scripts.map(script => script.src), [
     'https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js',
-    'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3',
     'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js',
     'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js'
