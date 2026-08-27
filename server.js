@@ -5,8 +5,15 @@ const helmet = require('helmet')
 const { rateLimit } = require('express-rate-limit')
 const { join } = require('node:path')
 
+const REQUIRED_ENV_VARS = ['NODE_ENV', 'PORT', 'ALLOWED_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OCR_API_KEY']
+const missingEnvVars = REQUIRED_ENV_VARS.filter(name => !String(process.env[name] || '').trim())
+if (missingEnvVars.length > 0) {
+  console.error(`Missing required environment variable(s): ${missingEnvVars.join(', ')}. See .env.example.`)
+  process.exit(1)
+}
+
 const root = __dirname
-const port = Number(process.env.PORT || 8000)
+const port = Number(process.env.PORT || 8080)
 const app = express()
 const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || '').split(',').map(origin => origin.trim()).filter(Boolean))
 
