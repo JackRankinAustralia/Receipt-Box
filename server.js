@@ -18,7 +18,7 @@ const app = express()
 const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || '').split(',').map(origin => origin.trim()).filter(Boolean))
 
 app.disable('x-powered-by')
-app.use(helmet())
+app.use(helmet({ contentSecurityPolicy: false }))
 app.use(cors({ origin(origin, callback) {
   if (!origin || allowedOrigins.has(origin)) return callback(null, true)
   return callback(new Error('Origin is not allowed by CORS.'))
