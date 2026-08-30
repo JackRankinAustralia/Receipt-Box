@@ -15,7 +15,7 @@ if (missingEnvVars.length > 0) {
 const root = __dirname
 const port = Number(process.env.PORT || 8080)
 const app = express()
-const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || '').split(',').map(origin => origin.trim()).filter(Boolean))
+const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || process.env.ALLOWED_ORIGIN || '').split(',').map(origin => origin.trim()).filter(Boolean))
 
 app.disable('x-powered-by')
 app.use(helmet({ contentSecurityPolicy: false }))
@@ -89,6 +89,7 @@ async function handleScanReceipt(request, response) {
     if (!upstream.ok) console.error('Google Gemini API error:', body.error)
     response.status(upstream.status).json(body)
   } catch (error) {
+    console.error('Gemini API Error:', error)
     const message = process.env.NODE_ENV === 'production' ? 'Gemini proxy request failed.' : error.message || 'Gemini proxy request failed.'
     response.status(502).json({ error: { message } })
   }
@@ -96,6 +97,7 @@ async function handleScanReceipt(request, response) {
 app.post(['/api/scan-receipt', '/api/scan'], scanLimiter, handleScanReceipt)
 app.use(express.static(root))
 app.use((error, request, response, next) => {
+  console.error('Unhandled request error:', error)
   const message = process.env.NODE_ENV === 'production' ? 'Request failed.' : error.message || 'Request failed.'
   if (response.headersSent) return next(error)
   response.status(error.type === 'entity.too.large' ? 413 : 400).json({ error: { message } })
