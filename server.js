@@ -55,6 +55,9 @@ function readRequestBody(request) {
 }
 
 async function handleScanReceipt(request, response) {
+  const contentLength = Number(request.headers['content-length'] || 0)
+  const bodyKeys = request.body && typeof request.body === 'object' ? Object.keys(request.body) : []
+  console.log(`scan-receipt request: contentLength=${contentLength} bytes, bodyKeys=[${bodyKeys.join(', ')}]`)
   const geminiApiKey = sanitizeGeminiApiKey(process.env.GEMINI_API_KEY)
   if (!geminiApiKey) {
     console.error('scan-receipt 400: GEMINI_API_KEY is not configured on the server.')
