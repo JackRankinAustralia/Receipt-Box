@@ -57,6 +57,7 @@ function readRequestBody(request) {
 async function handleScanReceipt(request, response) {
   const geminiApiKey = sanitizeGeminiApiKey(process.env.GEMINI_API_KEY)
   if (!geminiApiKey) {
+    console.error('scan-receipt 400: GEMINI_API_KEY is not configured on the server.')
     response.status(400).json({ error: 'Server missing GEMINI_API_KEY configuration.' })
     return
   }
@@ -65,6 +66,7 @@ async function handleScanReceipt(request, response) {
   try {
     const payload = request.body
     if (!payload || typeof payload !== 'object' || !Array.isArray(payload.contents)) {
+      console.error('scan-receipt 400: request body missing a valid contents array.', { bodyType: typeof payload, hasContents: Array.isArray(payload?.contents) })
       response.status(400).json({ error: { message: 'Request must contain a contents array.' } })
       return
     }
