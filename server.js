@@ -107,6 +107,48 @@ async function handleScanReceipt(request, response) {
   }
 }
 app.post(['/api/scan-receipt', '/api/scan'], scanLimiter, handleScanReceipt)
+
+// TEMPORARY diagnostic route — remove once the deployment issue is confirmed fixed.
+async function handleHealthCheck(request, response) {
+  const geminiApiKey = sanitizeGeminiApiKey(process.env.GEMINI_API_KEY)
+  const hasGeminiKey = !!geminiApiKey
+  const allowedOrigin = process.env.ALLOWED_ORIGIN || process.env.CORS_ORIGINS || null
+  let geminiResponse = null
+  let geminiError = null
+
+  if (!hasGeminiKey) {
+    geminiError = 'GEMINI_API_KEY is not configured on the server.'
+  } else {
+    try {
+      const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }] })
+      })
+      const text = await upstream.text()
+      if (!upstream.ok) {
+        geminiError = `Gemini API returned HTTP ${upstream.status}: ${text.slice(0, 300)}`
+      } else {
+        try {
+          geminiResponse = JSON.parse(text).candidates?.[0]?.content?.parts?.[0]?.text || null
+        } catch {
+          geminiResponse = text.slice(0, 300)
+        }
+      }
+    } catch (error) {
+      geminiError = error.message || 'Gemini test request failed.'
+    }
+  }
+
+  response.status(200).json({
+    status: 'ok',
+    config: { hasGeminiKey, allowedOrigin },
+    geminiResponse,
+    geminiError
+  })
+}
+app.get('/api/health-check', handleHealthCheck)
+
 app.use(express.static(root))
 app.use((error, request, response, next) => {
   console.error('Unhandled request error:', error)
