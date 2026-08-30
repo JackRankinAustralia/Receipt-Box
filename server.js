@@ -5,29 +5,42 @@ const helmet = require('helmet')
 const { rateLimit } = require('express-rate-limit')
 const { join } = require('node:path')
 
+// Never let an unexpected error take the whole process down; log and keep serving.
+process.on('uncaughtException', error => {
+  console.error('Uncaught exception:', error)
+})
+process.on('unhandledRejection', reason => {
+  console.error('Unhandled promise rejection:', reason)
+})
+
 const REQUIRED_ENV_VARS = ['NODE_ENV', 'PORT', 'ALLOWED_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OCR_API_KEY']
 const missingEnvVars = REQUIRED_ENV_VARS.filter(name => !String(process.env[name] || '').trim())
 if (missingEnvVars.length > 0) {
   console.error(`Missing required environment variable(s): ${missingEnvVars.join(', ')}. See .env.example.`)
-  process.exit(1)
 }
 
 const root = __dirname
 const port = Number(process.env.PORT || 8080)
 const app = express()
-const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || process.env.ALLOWED_ORIGIN || '').split(',').map(origin => origin.trim()).filter(Boolean))
 
-app.disable('x-powered-by')
-app.use(helmet({ contentSecurityPolicy: false }))
-app.use(cors({ origin(origin, callback) {
-  if (!origin || allowedOrigins.has(origin)) return callback(null, true)
-  return callback(new Error('Origin is not allowed by CORS.'))
-} }))
-app.use(express.json({ limit: '12mb' }))
+try {
+  const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || process.env.ALLOWED_ORIGIN || '').split(',').map(origin => origin.trim()).filter(Boolean))
 
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false })
-const scanLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
-app.use('/api', apiLimiter)
+  app.disable('x-powered-by')
+  app.use(helmet({ contentSecurityPolicy: false }))
+  app.use(cors({ origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true)
+    return callback(new Error('Origin is not allowed by CORS.'))
+  } }))
+  app.use(express.json({ limit: '12mb' }))
+
+  var apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false })
+  var scanLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
+  app.use('/api', apiLimiter)
+} catch (error) {
+  console.error('Failed to initialize middleware:', error)
+}
+
 function sanitizeGeminiApiKey(value) {
   return String(value || '').trim().replace(/^["']+|["']+$/g, '').trim()
 }
@@ -90,8 +103,7 @@ async function handleScanReceipt(request, response) {
     response.status(upstream.status).json(body)
   } catch (error) {
     console.error('Gemini API Error:', error)
-    const message = process.env.NODE_ENV === 'production' ? 'Gemini proxy request failed.' : error.message || 'Gemini proxy request failed.'
-    response.status(502).json({ error: { message } })
+    response.status(500).json({ error: { message: 'Receipt processing failed.' } })
   }
 }
 app.post(['/api/scan-receipt', '/api/scan'], scanLimiter, handleScanReceipt)
@@ -105,4 +117,6 @@ app.use((error, request, response, next) => {
 
 app.listen(port, () => {
   console.log(`Receipt Box server listening on http://localhost:${port}`)
+}).on('error', error => {
+  console.error('Failed to start server:', error)
 })
