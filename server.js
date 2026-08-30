@@ -60,8 +60,8 @@ async function handleScanReceipt(request, response) {
   console.log(`scan-receipt request: contentLength=${contentLength} bytes, bodyKeys=[${bodyKeys.join(', ')}]`)
   const geminiApiKey = sanitizeGeminiApiKey(process.env.GEMINI_API_KEY)
   if (!geminiApiKey) {
-    console.error('scan-receipt 400: GEMINI_API_KEY is not configured on the server.')
-    response.status(400).json({ error: 'Server missing GEMINI_API_KEY configuration.' })
+    console.error('scan-receipt 500: GEMINI_API_KEY is not configured on the server.')
+    response.status(500).json({ error: { message: 'Server missing GEMINI_API_KEY configuration.' } })
     return
   }
   const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
@@ -86,7 +86,7 @@ async function handleScanReceipt(request, response) {
     } catch {
       body = { error: { message: text || `Gemini API returned HTTP ${upstream.status}.` } }
     }
-    if (!upstream.ok) console.error('Google Gemini API error:', body.error)
+    if (!upstream.ok) console.error('Google Gemini API error response:', JSON.stringify(body))
     response.status(upstream.status).json(body)
   } catch (error) {
     console.error('Gemini API Error:', error)
