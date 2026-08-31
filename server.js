@@ -4,6 +4,7 @@ const cors = require('cors')
 const helmet = require('helmet')
 const { rateLimit } = require('express-rate-limit')
 const { join } = require('node:path')
+const { createHash } = require('node:crypto')
 
 // Never let an unexpected error take the whole process down; log and keep serving.
 process.on('uncaughtException', error => {
@@ -110,10 +111,21 @@ app.post(['/api/scan-receipt', '/api/scan'], scanLimiter, handleScanReceipt)
 
 // TEMPORARY diagnostic route — remove once the deployment issue is confirmed fixed.
 async function handleHealthCheck(request, response) {
+
   const geminiApiKey = sanitizeGeminiApiKey(process.env.GEMINI_API_KEY)
+
+  const geminiKeyFingerprint = geminiApiKey
+    ? createHash('sha256').update(geminiApiKey).digest('hex')
+    : null
+
+  const geminiKeyLength = geminiApiKey.length
+
   const hasGeminiKey = !!geminiApiKey
+
   const allowedOrigin = process.env.ALLOWED_ORIGIN || process.env.CORS_ORIGINS || null
+
   let geminiResponse = null
+
   let geminiError = null
 
   if (!hasGeminiKey) {
@@ -142,7 +154,12 @@ async function handleHealthCheck(request, response) {
 
   response.status(200).json({
     status: 'ok',
-    config: { hasGeminiKey, allowedOrigin },
+    config: {
+  hasGeminiKey,
+  allowedOrigin,
+  geminiKeyLength,
+  geminiKeyFingerprint
+},
     geminiResponse,
     geminiError
   })
