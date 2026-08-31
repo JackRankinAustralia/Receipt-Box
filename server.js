@@ -88,18 +88,37 @@ async function handleScanReceipt(request, response) {
       return
     }
 
-    const upstream = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
-      body: JSON.stringify(payload)
-    })
-    const text = await upstream.text()
+    const MAX_ATTEMPTS = 3
+    const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504])
+    const BACKOFF_MS = [0, 1000, 2000]
+
+    let upstream
+    let text
     let body
-    try {
-      body = JSON.parse(text)
-    } catch {
-      body = { error: { message: text || `Gemini API returned HTTP ${upstream.status}.` } }
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (BACKOFF_MS[attempt - 1] > 0) await new Promise(resolve => setTimeout(resolve, BACKOFF_MS[attempt - 1]))
+
+      upstream = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
+        body: JSON.stringify(payload)
+      })
+      text = await upstream.text()
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = { error: { message: text || `Gemini API returned HTTP ${upstream.status}.` } }
+      }
+
+      if (upstream.ok) break
+
+      const isRetryable = RETRYABLE_STATUS_CODES.has(upstream.status)
+      if (!isRetryable || attempt === MAX_ATTEMPTS) break
+
+      console.error(`Gemini temporary failure (${upstream.status}), retrying attempt ${attempt + 1} of ${MAX_ATTEMPTS}`)
     }
+
     if (!upstream.ok) console.error('Google Gemini API error response:', JSON.stringify(body))
     response.status(upstream.status).json(body)
   } catch (error) {
