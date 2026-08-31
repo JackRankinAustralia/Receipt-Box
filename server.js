@@ -77,7 +77,7 @@ async function handleScanReceipt(request, response) {
     response.status(500).json({ error: { message: 'Server missing GEMINI_API_KEY configuration.' } })
     return
   }
-  const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent'
+  const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
 
   try {
     const payload = request.body
