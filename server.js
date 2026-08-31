@@ -13,7 +13,7 @@ process.on('unhandledRejection', reason => {
   console.error('Unhandled promise rejection:', reason)
 })
 
-const REQUIRED_ENV_VARS = ['NODE_ENV', 'PORT', 'ALLOWED_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OCR_API_KEY']
+const REQUIRED_ENV_VARS = ['NODE_ENV', 'PORT', 'ALLOWED_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'GEMINI_API_KEY']
 const missingEnvVars = REQUIRED_ENV_VARS.filter(name => !String(process.env[name] || '').trim())
 if (missingEnvVars.length > 0) {
   console.error(`Missing required environment variable(s): ${missingEnvVars.join(', ')}. See .env.example.`)
