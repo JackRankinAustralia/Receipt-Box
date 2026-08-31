@@ -77,7 +77,7 @@ async function handleScanReceipt(request, response) {
     response.status(500).json({ error: { message: 'Server missing GEMINI_API_KEY configuration.' } })
     return
   }
-  const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+  const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent'
 
   try {
     const payload = request.body
@@ -120,7 +120,7 @@ async function handleHealthCheck(request, response) {
     geminiError = 'GEMINI_API_KEY is not configured on the server.'
   } else {
     try {
-      const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+      const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
         body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }] })
