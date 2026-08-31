@@ -22,6 +22,7 @@ if (missingEnvVars.length > 0) {
 const root = __dirname
 const port = Number(process.env.PORT || 8080)
 const app = express()
+app.set('trust proxy', 1)
 
 try {
   const allowedOrigins = new Set(String(process.env.CORS_ORIGINS || process.env.ALLOWED_ORIGIN || '').split(',').map(origin => origin.trim()).filter(Boolean))
