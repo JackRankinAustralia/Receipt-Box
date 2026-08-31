@@ -44,8 +44,10 @@ async function scanReceiptWithGemini(base64Image, mimeType = 'image/jpeg') {
   const prompt = `Analyze this receipt image and extract the key receipt information into JSON format with the following keys:
   - supplier: store/merchant name
   - date: purchase date in YYYY-MM-DD format
+  - date_text: date text exactly as it appears on the receipt
   - total: numeric total amount paid
-  - gst: numeric GST/tax amount (if indicated)`;
+  - gst: numeric GST/tax amount (if indicated)
+  This receipt is processed for an Australian user. Interpret ambiguous numeric dates as DD/MM/YYYY unless the receipt clearly indicates otherwise.`;
 
   const payload = {
     contents: [{
@@ -69,7 +71,9 @@ async function scanReceiptWithGemini(base64Image, mimeType = 'image/jpeg') {
   }
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw Error('Gemini API returned no receipt data.');
-  return JSON.parse(text);
+  const fields = JSON.parse(text);
+  fields.date = normaliseReceiptDate(fields.date_text || fields.date);
+  return fields;
 }
 
 
@@ -231,6 +235,18 @@ function isoDateFromText(text){
  if(!candidates.length)return null;
  const now=new Date(),min=new Date(now.getFullYear()-7,0,1),max=new Date(now.getFullYear()+1,11,31);
  return candidates.find(x=>{const d=new Date(x+'T12:00:00');return d>=min&&d<=max})||candidates[0]
+}
+function normaliseReceiptDate(value,region='AU'){
+ const text=String(value||'').trim(),order={AU:'DMY',US:'MDY',ISO:'YMD'}[region]||'DMY',months={jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,jul:7,july:7,aug:8,august:8,sep:9,sept:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12};
+ const toYear=year=>{const value=Number(year);return value<100?(value<=69?2000+value:1900+value):value};
+ const toISO=(year,month,day)=>{const date=new Date(year,month-1,day,12);return date.getFullYear()===year&&date.getMonth()===month-1&&date.getDate()===day?`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`:null};
+ let match=text.match(/\b(20\d{2})[\/.-](\d{1,2})[\/.-](\d{1,2})\b/);
+ if(match)return toISO(Number(match[1]),Number(match[2]),Number(match[3]));
+ match=text.match(/\b(\d{1,2})\s*[\/.-]\s*(\d{1,2})\s*[\/.-]\s*(20\d{2}|\d{2})\b/);
+ if(match){const first=Number(match[1]),second=Number(match[2]),year=toYear(match[3]),day=order==='MDY'?second:first,month=order==='MDY'?first:second;return toISO(year,month,day)}
+ match=text.match(/\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*(20\d{2}|\d{2})\b/i);
+ if(match)return toISO(toYear(match[3]),months[match[2].toLowerCase()],Number(match[1]));
+ return null
 }
 function contextualReceiptDate(text,referenceDate){const ref=new Date(referenceDate),rawText=String(text||''),lines=rawText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean),context=/\b(?:date|mon|tue(?:s)?|wed|thu(?:r|rs)?|fri|sat|sun|store|till|register|terminal|served|transaction)\b|\b\d{1,2}:\d{2}\b/i;let best=null;for(const line of lines){if(!context.test(line))continue;const matches=[...line.matchAll(/\b([0-3]?\d)\s*(?:[\/.-]|\s)\s*([01OQ]?\d)\s*(?:[\/.-]|\s)\s*(2[0OQ]\d{2})\b/gi)];for(const match of matches){const normal=part=>Number(String(part).replace(/[OQ]/gi,'0')),day=normal(match[1]),month=normal(match[2]),year=normal(match[3]),date=new Date(year,month-1,day,12);if(year<2015||year>ref.getFullYear()+1||date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day)continue;const distance=Math.abs(date-ref)/86400000,candidate={value:`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`,inferred:/[OQ]/i.test(match[0]),raw:match[0],contextual:true,distance};if(!best||distance<best.distance)best=candidate}}if(best)return best;if(!canonicalMerchant(rawText))return null;for(const line of lines){if((line.match(/-/g)||[]).length<3||!/(?:\d{4,}|\b[A-Z]\d{2,}\b)/i.test(line))continue;const match=line.match(/\b(20\d{2})[-\s]+([01]\d)[-\s]+([0-3]\d)\s*$/);if(!match)continue;const year=+match[1],month=+match[2],day=+match[3],date=new Date(year,month-1,day,12);if(year<2015||year>ref.getFullYear()+1||date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day)continue;return{value:`${year}-${match[2]}-${match[3]}`,inferred:true,raw:match[0].trim(),footerReference:true,distance:Math.abs(date-ref)/86400000}}return null}
 function dateInfoFromText(text,referenceDate=new Date()){const exact=isoDateFromText(text),ref=new Date(referenceDate);if(exact){const [year,month,day]=exact.split('-').map(Number),correctedYear=year+20,corrected=new Date(correctedYear,month-1,day,12),original=new Date(year,month-1,day,12),signals=(String(text).match(/\b(?:tax\s+invoice|abn|total|gst|eftpos?|receipt)\b/gi)||[]).length,known=canonicalMerchant(text);if(year>=2000&&year<=2009&&known&&signals>=4&&ref.getFullYear()-year>=15&&ref.getFullYear()-correctedYear>=0&&ref.getFullYear()-correctedYear<=5&&corrected.getMonth()===month-1&&corrected.getDate()===day)return{value:`${correctedYear}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`,inferred:true,raw:exact,yearCorrection:true,distance:Math.abs(corrected-ref)/86400000};return{value:exact,inferred:false,raw:exact,distance:Math.abs(original-ref)/86400000}}const contextual=contextualReceiptDate(text,ref);if(contextual)return contextual;const matches=[...String(text||'').matchAll(/\b(\d{1,2})\s*[\/.-]\s*(\d{1,2})\s*[\/.-]\s*(\d{3})(?!\d)/g)];let best=null;for(const m of matches){const day=+m[1],month=+m[2];if(day<1||day>31||month<1||month>12)continue;for(let digit=0;digit<=9;digit++){const year=Number(m[3]+digit),d=new Date(year,month-1,day,12);if(d.getFullYear()!==year||d.getMonth()!==month-1||d.getDate()!==day)continue;const distance=Math.abs(d-ref)/86400000;if(distance<=370&&(!best||distance<best.distance))best={value:`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`,inferred:true,raw:m[0],distance}}}return best}

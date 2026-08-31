@@ -188,6 +188,18 @@ test('reads the exact Bunnings date text as 2023 rather than 2003', () => {
   assert.equal(app.call('isoDateFromText', '10/05/2023'), '2023-05-10')
 })
 
+test('normalises Gemini receipt dates using Australian date order', () => {
+  const app = loadApp()
+  assert.equal(app.call('normaliseReceiptDate', '23-10-25'), '2025-10-23')
+  assert.equal(app.call('normaliseReceiptDate', '23/10/2025'), '2025-10-23')
+  assert.equal(app.call('normaliseReceiptDate', '04/12/2025'), '2025-12-04')
+  assert.equal(app.call('normaliseReceiptDate', '12/04/2025'), '2025-04-12')
+  assert.equal(app.call('normaliseReceiptDate', '4 Dec 2025'), '2025-12-04')
+  assert.equal(app.call('normaliseReceiptDate', '10/23/2025'), null)
+  assert.equal(app.call('normaliseReceiptDate', '23-10-70'), '1970-10-23')
+  assert.equal(app.call('normaliseReceiptDate', '32/13/2025'), null)
+})
+
 test('manual rotate updates the preview and can be reset', () => {
   const app = loadApp()
   app.element('cameraFile').files = [new File([new Uint8Array([1])], 'sideways.jpg', { type: 'image/jpeg' })]
