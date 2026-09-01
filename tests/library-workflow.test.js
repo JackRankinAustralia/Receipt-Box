@@ -95,7 +95,7 @@ test('save preserves manual OCR corrections and keeps the saved receipt open for
   assert.equal(result.id, 'new-receipt-id')
   assert.equal(app.element('amount').value, '88.40')
   assert.equal(app.element('saveBtn').dataset.edit, 'new-receipt-id')
-  assert.match(app.element('saveMsg').innerHTML, /Receipt saved/i)
+  assert.match(app.element('saveMsg').innerHTML, /Receipt saved\.<\/strong> You can keep editing, add another, or view it in Receipts\./i)
 })
 
 test('Save & add another saves once then fully resets transient receipt state', async () => {
@@ -122,7 +122,7 @@ test('Save & add another saves once then fully resets transient receipt state', 
   assert.equal(app.element('previewFrame').style.display, 'none')
   assert.equal(app.element('receiptPreview').style.transform, '')
   assert.equal(app.element('ocrDiagnosticsText').textContent, '')
-  assert.match(app.element('ocrStatus').innerHTML, /Read receipt automatically/)
+  assert.match(app.element('ocrStatus').textContent, /Receipt Box reads new receipt photos automatically\. Use Read again if you want to scan this image again\./)
   assert.match(app.element('saveMsg').innerHTML, /Ready for the next receipt/i)
   assert.equal(db.rows.length, 1)
 })
@@ -178,6 +178,7 @@ test('editing populates the saved fields and updates the existing receipt withou
     { supplier: 'Updated Supplier', receipt_date: '2026-08-18', total: 101.2, gst: 9.2, entity_name: 'Personal', category_name: 'Travel', project_name: 'Updated project', notes: 'Updated notes' }
   )
   assert.equal(db.rows.length, 1)
+  assert.match(app.element('saveMsg').innerHTML, /Receipt updated\.<\/strong> You can keep editing, add another, or view it in Receipts\./i)
 })
 
 test('editing from the Receipt Library activates the Add Receipt tab without reading the receipt', async () => {
