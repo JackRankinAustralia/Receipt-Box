@@ -41,9 +41,16 @@ function loadApp() {
     return {
       value: '', files: [], style: {}, dataset: {}, textContent: '', innerHTML: '', disabled: false,
       classList: { add(...names) { names.forEach(name => classes.add(name)) }, remove(...names) { names.forEach(name => classes.delete(name)) }, toggle(name, force) { const add = force === undefined ? !classes.has(name) : force; if (add) classes.add(name); else classes.delete(name); return add }, contains(name) { return classes.has(name) } },
-      removeAttribute(name) { delete this[name] }
+      children: [],
+      appendChild(child) { this.children.push(child); return child },
+      insertBefore(child, reference) { const index = this.children.indexOf(reference); this.children.splice(index < 0 ? this.children.length : index, 0, child); return child },
+      prepend(child) { this.children.unshift(child); return child },
+      removeAttribute(name) { delete this[name] },
+      setAttribute(name, value) { this[name] = value }
     }
   }
+  elements.mainArea = makeElement()
+  elements.mainArea.children = [makeElement(), makeElement(), makeElement(), makeElement()]
   const document = {
     getElementById(id) {
       if (!elements[id]) elements[id] = makeElement()

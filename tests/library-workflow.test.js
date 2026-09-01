@@ -180,6 +180,45 @@ test('editing populates the saved fields and updates the existing receipt withou
   assert.equal(db.rows.length, 1)
 })
 
+test('editing from the Receipt Library activates the Add Receipt tab without reading the receipt', async () => {
+  const app = loadApp(), db = backend([receipt()])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  app.call('activateMainTab', 'receipts')
+  let reads = 0
+  app.setFunction('scanReceiptWithGemini', async () => { reads++ })
+
+  await app.call('editReceipt', 'receipt-1')
+
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(tabbar.children[0]['aria-selected'], 'true')
+  assert.equal(addView.classList.contains('hidden'), false)
+  assert.equal(receiptsView.classList.contains('hidden'), true)
+  assert.equal(app.element('supplier').value, 'Alpha Supplies')
+  assert.equal(app.element('receiptPreview').src, 'https://example.test/receipt')
+  assert.equal(reads, 0)
+})
+
+test('editing from the receipt detail view activates the Add Receipt tab', async () => {
+  const app = loadApp(), db = backend([receipt()])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  app.call('activateMainTab', 'receipts')
+
+  app.call('openDetail', 'receipt-1')
+  app.element('modalEditReceipt').onclick()
+  await waitFor(() => app.state().receiptMode === 'edit')
+
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(addView.classList.contains('hidden'), false)
+  assert.equal(receiptsView.classList.contains('hidden'), true)
+  assert.equal(app.element('supplier').value, 'Alpha Supplies')
+})
+
 test('a stale stored image preview cannot replace a newer receipt selection', async () => {
   const app = loadApp(), db = backend([receipt()]), signedUrl = deferred()
   db.storage.from = () => ({
