@@ -9,6 +9,7 @@ const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrat
 const indexMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821133000_add_composite_fk_indexes.sql'), 'utf8')
 const entitlementMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821150000_add_free_pro_entitlements.sql'), 'utf8')
 const quotaMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260822100000_reduce_free_ocr_limit_to_10.sql'), 'utf8')
+const lifecycleMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260901193000_add_receipt_workflow_lifecycle.sql'), 'utf8')
 
 async function driftedProductionShape(db) {
   await db.exec(`
@@ -49,8 +50,11 @@ test('migration dry-run reconciles production drift, enforces ownership, and rol
     await db.exec(entitlementMigration)
     await db.exec(quotaMigration)
     await db.exec(quotaMigration)
+    await db.exec(lifecycleMigration)
+    await db.exec(lifecycleMigration)
 
     assert.deepEqual((await db.query('select count(*)::int receipts,count(entity_id)::int entity_links,count(category_id)::int category_links,count(project_id)::int project_links,count(*) filter(where user_id is null)::int ownerless from receipts')).rows[0],{receipts:6,entity_links:6,category_links:6,project_links:5,ownerless:0})
+    assert.deepEqual((await db.query("select workflow_status,count(*)::int count from receipts group by workflow_status")).rows,[{workflow_status:'completed',count:6}])
     assert.deepEqual((await db.query('select supplier,entity_name,category_name,project_name from receipts order by supplier')).rows,before)
     assert.deepEqual((await db.query('select (select count(*)::int from entities where user_id=$1) entities,(select count(*)::int from categories where user_id=$1) categories,(select count(*)::int from projects where user_id=$1) projects',[owner])).rows[0],{entities:3,categories:10,projects:5})
     assert.deepEqual((await db.query('select count(*)::int total,count(*) filter(where is_grandfathered)::int grandfathered from entities where user_id=$1',[owner])).rows[0],{total:3,grandfathered:3})

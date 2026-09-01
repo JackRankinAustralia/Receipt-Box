@@ -5,6 +5,16 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821090000_add_user_managed_dimensions.sql'), 'utf8')
+const lifecycleMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260901193000_add_receipt_workflow_lifecycle.sql'), 'utf8')
+
+test('receipt lifecycle migration defaults legacy receipts to completed without changing ownership policies', () => {
+  assert.match(lifecycleMigration, /alter table public\.receipts[\s\S]*add column if not exists workflow_status text not null default 'completed'/i)
+  assert.match(lifecycleMigration, /add column if not exists reviewed_at timestamptz/i)
+  assert.match(lifecycleMigration, /set workflow_status = 'completed'\s+where workflow_status is null/i)
+  assert.match(lifecycleMigration, /check \(workflow_status in \('uploading', 'queued', 'reading', 'needs_review', 'needs_attention', 'completed'\)\)/i)
+  assert.doesNotMatch(lifecycleMigration, /\b(?:create|alter|drop)\s+policy\b/i)
+  assert.doesNotMatch(lifecycleMigration, /\b(?:grant|revoke)\b/i)
+})
 
 test('migration reconciles an already partially-created production schema', () => {
   for (const table of ['entities', 'categories', 'projects']) {

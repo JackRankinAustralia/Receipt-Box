@@ -33,6 +33,27 @@ test('uses Australian July-to-June financial-year boundaries', () => {
   assert.deepEqual(ids(app.call('reportPeriodRows')), boundaryRows.map(row => row.id))
 })
 
+test('excludes incomplete receipt lifecycle states from financial and normal Library rows', () => {
+  const app = loadApp()
+  app.setPeriod('all')
+  const rows = [
+    { id: 'legacy', supplier: 'Legacy receipt', receipt_date: '2026-08-01', total: 10, gst: 1 },
+    { id: 'completed', supplier: 'Completed receipt', receipt_date: '2026-08-02', total: 20, gst: 2, workflow_status: 'completed' },
+    ...['uploading', 'queued', 'reading', 'needs_review', 'needs_attention'].map((workflow_status, index) => ({
+      id: workflow_status, supplier: workflow_status+' receipt', receipt_date: '2026-08-03', total: 100 + index, gst: 10 + index, workflow_status
+    }))
+  ]
+  app.setRows(rows)
+
+  assert.deepEqual(ids(app.call('reportPeriodRows')), ['legacy', 'completed'])
+  assert.deepEqual(JSON.parse(JSON.stringify(app.call('reportMetrics', app.call('reportPeriodRows')))), { total: 30, gst: 3, count: 2, average: 15 })
+  assert.deepEqual(ids(app.call('filterAndSortReceipts', rows, { sort: 'oldest' })), ['legacy', 'completed'])
+  const csv = app.call('buildReportCSV')
+  assert.match(csv, /"Legacy receipt"/)
+  assert.match(csv, /"Completed receipt"/)
+  for (const status of ['uploading', 'queued', 'reading', 'needs_review', 'needs_attention']) assert.doesNotMatch(csv, new RegExp('"'+status+' receipt"'))
+})
+
 test('uses inclusive custom date boundaries and report filters', () => {
   const app = loadApp()
   app.setRows([
@@ -133,7 +154,8 @@ test('passes selected-period metrics, summaries, projects, and receipts to the P
   app.setRows([
     { receipt_date: '2026-07-31', supplier: 'Excluded', total: 999, gst: 90, category_name: 'Other', entity_name: 'Personal', project_name: 'Old project' },
     { receipt_date: '2026-08-01', supplier: 'Ampol', total: 110, gst: 10, category_name: 'Fuel', entity_name: 'AWTCO', project_name: 'A very long project name that must wrap safely' },
-    { receipt_date: '2026-08-02', supplier: 'Adobe', total: 220, gst: 20, category_name: 'Software', entity_name: 'National Events', project_name: '' }
+    { receipt_date: '2026-08-02', supplier: 'Adobe', total: 220, gst: 20, category_name: 'Software', entity_name: 'National Events', project_name: '' },
+    { receipt_date: '2026-08-03', supplier: 'Needs review', total: 999, gst: 90, category_name: 'Other', entity_name: 'Personal', project_name: '', workflow_status: 'needs_review' }
   ])
 
   const state = { texts: [], tables: [], filename: null }
@@ -164,6 +186,7 @@ test('passes selected-period metrics, summaries, projects, and receipts to the P
   assert.ok(state.texts.includes('$30.00'))
   assert.ok(state.texts.includes('2'))
   assert.ok(state.texts.includes('$165.00'))
+  assert.ok(!state.texts.includes('$1,329.00'))
   const plain = value => JSON.parse(JSON.stringify(value))
   assert.deepEqual(plain(state.tables[0].head), [['Entity', 'Receipts', 'Total']])
   assert.deepEqual(plain(state.tables[1].head), [['Category', 'Receipts', 'Total']])

@@ -92,10 +92,26 @@ test('save preserves manual OCR corrections and keeps the saved receipt open for
   assert.equal(db.calls.inserts[0].supplier, 'Corrected Supplier')
   assert.equal(db.calls.inserts[0].total, 88.40)
   assert.equal(db.calls.inserts[0].notes, 'Manually corrected after OCR')
+  assert.equal(db.calls.inserts[0].workflow_status, 'completed')
+  assert.match(db.calls.inserts[0].reviewed_at, /^\d{4}-\d{2}-\d{2}T/)
   assert.equal(result.id, 'new-receipt-id')
   assert.equal(app.element('amount').value, '88.40')
   assert.equal(app.element('saveBtn').dataset.edit, 'new-receipt-id')
   assert.match(app.element('saveMsg').innerHTML, /Receipt saved\.<\/strong> You can keep editing, add another, or view it in Receipts\./i)
+})
+
+test('dashboard totals exclude incomplete receipts', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'completed', total: 25, gst: 2.27, workflow_status: 'completed' }),
+    receipt({ id: 'needs-review', total: 100, gst: 9.09, workflow_status: 'needs_review' })
+  ])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  assert.equal(app.element('total').textContent, '$25.00')
+  assert.equal(app.element('gstTotal').textContent, '$2.27')
 })
 
 test('Save & add another saves once then fully resets transient receipt state', async () => {
@@ -173,6 +189,8 @@ test('editing populates the saved fields and updates the existing receipt withou
   assert.equal(db.calls.inserts.length, 0)
   assert.equal(db.calls.updates.length, 1)
   assert.equal(db.calls.updates[0].id, 'receipt-1')
+  assert.equal(db.calls.updates[0].payload.workflow_status, 'completed')
+  assert.match(db.calls.updates[0].payload.reviewed_at, /^\d{4}-\d{2}-\d{2}T/)
   assert.deepEqual(
     Object.fromEntries(['supplier', 'receipt_date', 'total', 'gst', 'entity_name', 'category_name', 'project_name', 'notes'].map(key => [key, db.calls.updates[0].payload[key]])),
     { supplier: 'Updated Supplier', receipt_date: '2026-08-18', total: 101.2, gst: 9.2, entity_name: 'Personal', category_name: 'Travel', project_name: 'Updated project', notes: 'Updated notes' }
