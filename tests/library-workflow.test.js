@@ -59,6 +59,12 @@ function backend(initialRows = []) {
   return api
 }
 
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((onResolve, onReject) => { resolve = onResolve; reject = onReject })
+  return { promise, resolve, reject }
+}
+
 function fillForm(app, values = {}) {
   const defaults = {
     supplier: 'Corrected Supplier', date: '2026-08-17', amount: '88.40', gst: '8.04',
@@ -139,6 +145,8 @@ test('editing updates the existing receipt with every editable field and does no
   app.setRows(db.rows)
   await app.call('loadSettings')
   app.call('editReceipt', 'receipt-1')
+  assert.equal(app.state().receiptMode, 'edit')
+  assert.equal(app.state().editingExistingReceipt, true)
   fillForm(app, { supplier: 'Updated Supplier', date: '2026-08-18', amount: '101.20', gst: '9.20', entity: 'Personal', category: 'Travel', project: 'Updated project', notes: 'Updated notes' })
 
   await app.call('save')
@@ -151,6 +159,66 @@ test('editing updates the existing receipt with every editable field and does no
     { supplier: 'Updated Supplier', receipt_date: '2026-08-18', total: 101.2, gst: 9.2, entity_name: 'Personal', category_name: 'Travel', project_name: 'Updated project', notes: 'Updated notes' }
   )
   assert.equal(db.rows.length, 1)
+})
+
+test('selecting a new receipt after saving creates a new receipt instead of updating the prior one', async () => {
+  const app = loadApp(), db = backend()
+  app.setBackend(db)
+  await app.call('loadSettings')
+  fillForm(app, { supplier: 'Receipt A' })
+  await app.call('save')
+  app.element('libraryFile').files = [new File([new Uint8Array([1])], 'receipt-b.jpg', { type: 'image/jpeg' })]
+  app.setFunction('prepareReceiptFile', async file => file)
+  await app.call('handleReceiptSelection', app.element('libraryFile').files[0])
+  fillForm(app, { supplier: 'Receipt B' })
+  await app.call('save')
+  assert.equal(db.calls.inserts.length, 2)
+  assert.equal(db.calls.updates.length, 0)
+})
+
+test('prevents overlapping saves and restores controls after a failed save', async () => {
+  const app = loadApp(), db = backend(), upload = deferred()
+  db.storage.from = () => ({
+    upload: async () => upload.promise,
+    remove: async () => ({ error: null }),
+    createSignedUrl: async () => ({ data: { signedUrl: 'https://example.test/receipt' }, error: null })
+  })
+  app.setBackend(db)
+  await app.call('loadSettings')
+  app.element('libraryFile').files = [new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })]
+  fillForm(app)
+  const first = app.call('save')
+  assert.equal(app.element('saveBtn').disabled, true)
+  assert.equal(app.element('saveAnotherBtn').disabled, true)
+  assert.equal(app.element('saveMsg').textContent, 'Saving receipt…')
+  await app.call('save')
+  assert.equal(db.calls.inserts.length, 0)
+  upload.resolve({ error: new Error('Upload failed') })
+  assert.equal(await first, null)
+  assert.equal(app.element('saveBtn').disabled, false)
+  assert.equal(app.element('saveAnotherBtn').disabled, false)
+})
+
+test('ignores Gemini fields after the active receipt selection changes', async () => {
+  const app = loadApp(), db = backend(), scan = deferred()
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  app.element('libraryFile').files = [new File([new Uint8Array([1])], 'receipt-a.jpg', { type: 'image/jpeg', lastModified: Date.now() })]
+  let scanStarted = false
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', async () => { scanStarted = true; return scan.promise })
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.run('receiptOCRReady = true; receiptSelectionGeneration = 1')
+  const reading = app.call('readReceiptWithGemini')
+  while (!scanStarted) await new Promise(resolve => setImmediate(resolve))
+  const receiptB = new File([new Uint8Array([2])], 'receipt-b.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [receiptB]
+  await app.call('handleReceiptSelection', receiptB)
+  scan.resolve({ supplier: 'Stale supplier', date: '2025-10-23', total: 25.23, gst: 2.29 })
+  await reading
+  assert.equal(app.element('supplier').value, '')
+  assert.equal(app.element('date').value, '2026-08-18')
+  assert.equal(app.element('amount').value, '')
 })
 
 test('delete requires explicit confirmation and removes the stored attachment and row', async () => {

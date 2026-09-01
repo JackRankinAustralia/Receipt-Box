@@ -83,6 +83,9 @@ function loadApp() {
     call(name, ...args) {
       return context[name](...args)
     },
+    run(source) {
+      return vm.runInContext(source, context)
+    },
     setRows(rows) {
       context.__testRows = rows
       vm.runInContext('allRows = __testRows; receiptRows = __testRows', context)
@@ -109,7 +112,7 @@ function loadApp() {
       vm.runInContext('previewUrl = __testPreviewUrl', context)
     },
     state() {
-      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration, entitlementState, ocrScanSessionId })', context)
+      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration, entitlementState, ocrScanSessionId, receiptMode, editingExistingReceipt, saveInProgress, receiptSelectionGeneration })', context)
     },
     revokedObjectUrls,
     setBackend(backend, testUser = { id: 'test-user' }) {
@@ -130,6 +133,10 @@ function loadApp() {
     },
     setHeicConverter(converter) {
       context.heic2any = converter
+    },
+    setFunction(name, fn) {
+      context.__testFunction = fn
+      vm.runInContext(`${name} = __testFunction`, context)
     },
     element(id) {
       return elements[id] || (elements[id] = makeElement())
