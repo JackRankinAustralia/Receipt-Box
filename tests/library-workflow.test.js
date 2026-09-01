@@ -144,15 +144,28 @@ test('sorts, searches, and filters the receipt library without mutating source r
   assert.deepEqual(rows.map(row => row.id), ['b', 'a', 'c'])
 })
 
-test('editing updates the existing receipt with every editable field and does not insert a duplicate', async () => {
+test('editing populates the saved fields and updates the existing receipt without automatic reading', async () => {
   const app = loadApp()
   const db = backend([receipt()])
   app.setBackend(db)
   app.setRows(db.rows)
   await app.call('loadSettings')
-  app.call('editReceipt', 'receipt-1')
+  let reads = 0
+  app.setFunction('scanReceiptWithGemini', async () => { reads++ })
+  await app.call('editReceipt', 'receipt-1')
   assert.equal(app.state().receiptMode, 'edit')
   assert.equal(app.state().editingExistingReceipt, true)
+  assert.equal(app.element('supplier').value, 'Alpha Supplies')
+  assert.equal(app.element('date').value, '2026-08-10')
+  assert.equal(app.element('amount').value, 25)
+  assert.equal(app.element('gst').value, 2.27)
+  assert.equal(app.element('entity').value, 'AWTCO')
+  assert.equal(app.element('category').value, 'Office Supplies')
+  assert.equal(app.element('project').value, 'Expo')
+  assert.equal(app.element('notes').value, 'Original')
+  assert.equal(app.element('receiptPreview').src, 'https://example.test/receipt')
+  assert.equal(app.element('previewFrame').style.display, 'grid')
+  assert.equal(reads, 0)
   fillForm(app, { supplier: 'Updated Supplier', date: '2026-08-18', amount: '101.20', gst: '9.20', entity: 'Personal', category: 'Travel', project: 'Updated project', notes: 'Updated notes' })
 
   await app.call('save')
@@ -167,6 +180,26 @@ test('editing updates the existing receipt with every editable field and does no
   assert.equal(db.rows.length, 1)
 })
 
+test('a stale stored image preview cannot replace a newer receipt selection', async () => {
+  const app = loadApp(), db = backend([receipt()]), signedUrl = deferred()
+  db.storage.from = () => ({
+    upload: async () => ({ error: null }),
+    remove: async () => ({ error: null }),
+    createSignedUrl: async () => signedUrl.promise
+  })
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  const editing = app.call('editReceipt', 'receipt-1')
+  const receiptB = new File([new Uint8Array([1])], 'receipt-b.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [receiptB]
+  app.setFunction('prepareReceiptFile', async file => file)
+  await app.call('handleReceiptSelection', receiptB)
+  signedUrl.resolve({ data: { signedUrl: 'https://example.test/receipt-a' }, error: null })
+  await editing
+  assert.notEqual(app.element('receiptPreview').src, 'https://example.test/receipt-a')
+})
+
 test('selecting a new receipt after saving creates a new receipt instead of updating the prior one', async () => {
   const app = loadApp(), db = backend()
   app.setBackend(db)
@@ -179,6 +212,28 @@ test('selecting a new receipt after saving creates a new receipt instead of upda
   fillForm(app, { supplier: 'Receipt B' })
   await app.call('save')
   assert.equal(db.calls.inserts.length, 2)
+  assert.equal(db.calls.updates.length, 0)
+})
+
+test('selecting a new image while editing creates a new receipt and may read it automatically', async () => {
+  const app = loadApp(), db = backend([receipt()])
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('editReceipt', 'receipt-1')
+  let reads = 0
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', async () => { reads++; return { supplier: 'Receipt B', date: '2025-10-24', total: 30, gst: 2.73 } })
+  const receiptB = new File([new Uint8Array([1])], 'receipt-b.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [receiptB]
+  await app.call('handleReceiptSelection', receiptB)
+  await waitFor(() => reads === 1 && app.element('supplier').value === 'Receipt B')
+  assert.equal(app.state().receiptMode, 'create')
+  assert.equal(app.element('saveBtn').dataset.edit, undefined)
+  await app.call('save')
+  assert.equal(db.calls.inserts.length, 1)
   assert.equal(db.calls.updates.length, 0)
 })
 
