@@ -1,5 +1,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const { loadApp } = require('./load-app')
 
 function receipt(overrides = {}) {
@@ -63,6 +65,10 @@ function deferred() {
   let resolve, reject
   const promise = new Promise((onResolve, onReject) => { resolve = onResolve; reject = onReject })
   return { promise, resolve, reject }
+}
+
+async function waitFor(condition) {
+  while (!condition()) await new Promise(resolve => setImmediate(resolve))
 }
 
 function fillForm(app, values = {}) {
@@ -219,6 +225,88 @@ test('ignores Gemini fields after the active receipt selection changes', async (
   assert.equal(app.element('supplier').value, '')
   assert.equal(app.element('date').value, '2026-08-18')
   assert.equal(app.element('amount').value, '')
+})
+
+test('selecting an image automatically reads and fills receipt fields once', async () => {
+  const app = loadApp(), db = backend()
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  let reads = 0
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', async () => { reads++; return { supplier: 'APCO Wangaratta', date: '2025-10-23', total: 25.23, gst: 2.29 } })
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+  await app.call('handleReceiptSelection', image)
+  await waitFor(() => reads === 1)
+  await waitFor(() => app.element('supplier').value === 'APCO Wangaratta')
+  assert.equal(app.element('date').value, '2025-10-23')
+  assert.equal(app.element('amount').value, '25.23')
+  assert.equal(app.element('gst').value, '2.29')
+  assert.match(app.element('ocrStatus').innerHTML, /Receipt details filled in/i)
+  await app.call('readReceiptWithGemini')
+  assert.equal(reads, 2, 'Read again remains available after automatic reading')
+})
+
+test('does not auto-read PDFs and leaves them available for saving', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /if\(f\.type==='application\/pdf'\)\{[\s\S]*?return\}await handleReceiptFileInput/)
+  assert.doesNotMatch(html, /if\(f\.type==='application\/pdf'\)\{[\s\S]*?startAutomaticReceiptReading/)
+})
+
+test('automatic reading respects the existing Free-plan admission result', async () => {
+  const app = loadApp(), db = backend()
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: false }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  let reads = 0
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('scanReceiptWithGemini', async () => { reads++ })
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+  await app.call('handleReceiptSelection', image)
+  await waitFor(() => !app.state().saveInProgress && app.element('ocrStatus').innerHTML.includes('Automatic reading is unavailable'))
+  assert.equal(reads, 0)
+  assert.equal(app.element('readBtn').disabled, false)
+})
+
+test('selecting B during automatic reading keeps B as the active scan and rejects A', async () => {
+  const app = loadApp(), db = backend(), scanA = deferred()
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  let reads = 0
+  app.setFunction('scanReceiptWithGemini', async () => ++reads === 1 ? scanA.promise : { supplier: 'Receipt B', date: '2025-10-24', total: 30, gst: 2.73 })
+  const receiptA = new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [receiptA]
+  await app.call('handleReceiptSelection', receiptA)
+  await waitFor(() => reads === 1)
+  const receiptB = new File([new Uint8Array([2])], 'b.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [receiptB]
+  await app.call('handleReceiptSelection', receiptB)
+  await waitFor(() => reads === 2 && app.element('supplier').value === 'Receipt B')
+  scanA.resolve({ supplier: 'Receipt A', date: '2025-10-23', total: 25.23, gst: 2.29 })
+  await waitFor(() => !app.state().ocrReading)
+  assert.equal(app.element('supplier').value, 'Receipt B')
+  assert.equal(app.element('date').value, '2025-10-24')
+})
+
+test('does not start two automatic scans for one image selection', async () => {
+  const app = loadApp(), db = backend(), scan = deferred()
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  let reads = 0
+  app.setFunction('scanReceiptWithGemini', async () => { reads++; return scan.promise })
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+  await app.call('handleReceiptSelection', image)
+  await waitFor(() => reads === 1)
+  await app.call('readReceiptWithGemini')
+  assert.equal(reads, 1)
+  scan.resolve({ supplier: 'Single scan', date: '2025-10-23', total: 25.23, gst: 2.29 })
+  await waitFor(() => !app.state().ocrReading)
 })
 
 test('delete requires explicit confirmation and removes the stored attachment and row', async () => {

@@ -262,7 +262,7 @@ test('valid receipt selection enables OCR while clear, decode failure and stale 
   assert.equal(app.element('readBtn').disabled, true)
   assert.equal(await app.call('handleReceiptSelection', bunnings), true)
   assert.equal(app.element('previewFrame').style.display, 'grid')
-  assert.match(app.element('ocrStatus').textContent, /Photo ready/i)
+  assert.match(app.element('ocrStatus').textContent, /Reading your receipt/i)
   assert.equal(app.element('readBtn').disabled, false)
 
   app.call('resetReceiptForm')

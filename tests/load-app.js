@@ -112,7 +112,7 @@ function loadApp() {
       vm.runInContext('previewUrl = __testPreviewUrl', context)
     },
     state() {
-      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration, entitlementState, ocrScanSessionId, receiptMode, editingExistingReceipt, saveInProgress, receiptSelectionGeneration })', context)
+      return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration, entitlementState, ocrScanSessionId, receiptMode, editingExistingReceipt, saveInProgress, receiptSelectionGeneration, ocrReading })', context)
     },
     revokedObjectUrls,
     setBackend(backend, testUser = { id: 'test-user' }) {
