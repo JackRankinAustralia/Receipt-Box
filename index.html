@@ -427,35 +427,4 @@ async function handleReceiptFileInput(input,otherInput){const file=input.files[0
 initTabs();document.querySelectorAll('[data-show-pro]').forEach(button=>button.onclick=showProInfo);
  $('settingsBtn').onclick=openSettings;$('settingsBackBtn').onclick=closeSettings;$('changePasswordBtn').onclick=changePassword;$('resetPasswordBtn').onclick=sendPasswordReset;$('deleteAccountBtn').onclick=deleteAccount;document.querySelectorAll('[data-add-setting]').forEach(button=>button.onclick=()=>addSetting(button.dataset.addSetting));$('loginBtn').onclick=login;$('password').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();login()}};$('logoutBtn').onclick=async()=>{await sb.auth.signOut()};$('cameraFile').onchange=()=>handleReceiptFileInput($('cameraFile'),$('libraryFile'));$('libraryFile').onchange=async()=>{const input=$('libraryFile'),f=input.files[0];if(!f)return;$('cameraFile').value='';if(f.type==='application/pdf'){receiptSelectionGeneration++;receiptOCRReady=false;syncReadButtonState();clearReceiptOCRFields();ocrScanSessionId=crypto.randomUUID();manualReceiptRotation=0;manualOrientationOverride=false;$('fileName').textContent='Selected: '+f.name;preparedReceiptFile=null;receiptPreparation=null;showPreview();$('ocrStatus').textContent='PDF selected. Save is available, but automatic reading currently needs a photo.';return}await handleReceiptFileInput(input,$('cameraFile'))};$('date').addEventListener('input',()=>dateTouched=true);$('category').addEventListener('change',()=>categoryTouched=true);$('readBtn').onclick=readReceipt;$('rotateBtn').onclick=rotateReceiptPreview;$('saveBtn').onclick=save;$('saveAnotherBtn').onclick=saveAndAddAnother;$('clearBtn').onclick=resetReceiptForm;$('search').oninput=renderRows;$('filterEntity').onchange=renderRows;$('filterCategory').onchange=renderRows;$('filterDateFrom').onchange=renderRows;$('filterDateTo').onchange=renderRows;$('receiptSort').onchange=renderRows;$('csvBtn').onclick=exportCSV;$('reportPeriod').onchange=()=>{closeReportDrill();renderReports()};['reportDateFrom','reportDateTo','reportEntity','reportCategory','reportProject'].forEach(id=>$(id).onchange=()=>{closeReportDrill();renderReports()});$('reportCsvBtn').onclick=exportReportCSV;$('reportPdfBtn').onclick=exportReportPDF;$('shareReportBtn').onclick=shareReportCSV;$('openReportBtn').onclick=openReportCSV;$('exportClose').onclick=()=>$('exportModal').classList.add('hidden');$('exportModal').onclick=e=>{if(e.target===$('exportModal'))$('exportModal').classList.add('hidden')};$('reportDrillClose').onclick=closeReportDrill;$('detailClose').onclick=closeReceiptDetail;$('detailModal').onclick=e=>{if(e.target===$('detailModal'))$('detailModal').classList.add('hidden')};$('date').value=new Date().toISOString().slice(0,10);syncReadButtonState();init();
 $('logoutBtn').onclick=signOutCurrentUser;
-async function scanReceiptWithGemini(base64Image, mimeType = 'image/jpeg') {
-  const prompt = `Analyze this receipt image and extract the key receipt information into JSON format with the following keys:
-  - supplier: store/merchant name
-  - date: purchase date in YYYY-MM-DD format
-  - total: numeric total amount paid
-  - gst: numeric GST/tax amount (if indicated)`;
-
-  const payload = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inlineData: { mimeType, data: base64Image } }
-      ]
-    }],
-    generationConfig: { responseMimeType: 'application/json' }
-  };
-  const response = await fetch('/api/scan-receipt', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    const detail = data?.error?.message || `Gemini API request failed with HTTP ${response.status}.`;
-    throw Error(detail);
-  }
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw Error('Gemini API returned no receipt data.');
-  return JSON.parse(text);
-}
 </script></body></html>

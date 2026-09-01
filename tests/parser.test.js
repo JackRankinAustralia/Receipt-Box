@@ -200,6 +200,11 @@ test('normalises Gemini receipt dates using Australian date order', () => {
   assert.equal(app.call('normaliseReceiptDate', '32/13/2025'), null)
 })
 
+test('defines the Gemini receipt scanner only once', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.equal((html.match(/async function scanReceiptWithGemini\(/g) || []).length, 1)
+})
+
 test('manual rotate updates the preview and can be reset', () => {
   const app = loadApp()
   app.element('cameraFile').files = [new File([new Uint8Array([1])], 'sideways.jpg', { type: 'image/jpeg' })]
