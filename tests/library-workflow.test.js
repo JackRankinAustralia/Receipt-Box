@@ -363,8 +363,8 @@ test('selecting an image automatically reads and fills receipt fields once', asy
 
 test('does not auto-read PDFs and leaves them available for saving', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
-  assert.match(html, /if\(f\.type==='application\/pdf'\)\{[\s\S]*?return\}await handleReceiptFileInput/)
-  assert.doesNotMatch(html, /if\(f\.type==='application\/pdf'\)\{[\s\S]*?startAutomaticReceiptReading/)
+  assert.match(html, /if\(files\.length===1&&pdfs\.length===1\)\{[\s\S]*?return;[\s\S]*?\}/)
+  assert.doesNotMatch(html, /if\(files\.length===1&&pdfs\.length===1\)\{[\s\S]*?startAutomaticReceiptReading/)
 })
 
 test('automatic reading respects the existing Free-plan admission result', async () => {
@@ -541,6 +541,182 @@ test('durable admission does not disturb existing completed receipts or the ordi
   assert.equal(completedRow.workflow_status, 'completed')
   assert.equal(completedRow.supplier, 'Alpha Supplies')
   assert.equal(JSON.stringify(app.call('filterAndSortReceipts', db.rows, {}).map(r => r.id)), JSON.stringify(['completed-1']))
+})
+
+test('libraryFile input supports multi-select and cameraFile does not', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /<input id="libraryFile" type="file" accept="image\/\*,application\/pdf" multiple/)
+  assert.match(html, /<input id="cameraFile" type="file" accept="image\/\*" capture="environment"/)
+  assert.doesNotMatch(html, /<input id="cameraFile"[^>]*multiple/)
+})
+
+test('admitDurableReceiptBatch admits every file independently with distinct ids, scan sessions and paths', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const files = [
+    new File(['a'], 'one.jpg', { type: 'image/jpeg' }),
+    new File(['b'], 'two.jpg', { type: 'image/jpeg' }),
+    new File(['c'], 'three.jpg', { type: 'image/jpeg' })
+  ]
+
+  const results = await app.call('admitDurableReceiptBatch', files, 3)
+
+  assert.equal(results.length, 3)
+  assert.equal(results.every(r => r.ok), true)
+  assert.equal(db.calls.inserts.length, 3)
+  const ids = db.calls.inserts.map(i => i.id)
+  assert.equal(new Set(ids).size, 3, 'each admission gets a distinct receipt id')
+  const scanSessionIds = db.calls.inserts.map(i => i.scan_session_id)
+  assert.equal(new Set(scanSessionIds).size, 3, 'each admission gets a distinct scan_session_id')
+  const paths = db.calls.uploads.map(u => u.path)
+  assert.equal(new Set(paths).size, 3, 'each admission gets a distinct storage path')
+
+  await app.call('load')
+  assert.equal(app.call('needsReviewRows').length, 3)
+  assert.equal(app.element('needsReviewCount').textContent, '3')
+  assert.equal(app.call('filterAndSortReceipts', db.rows, {}).length, 0)
+  assert.equal(app.call('reportPeriodRows', db.rows, { mode: 'fy' }).length, 0)
+})
+
+test('admitDurableReceiptBatch isolates a single failure from its siblings', async () => {
+  const app = loadApp(), db = backend([])
+  let uploadCount = 0
+  db.storage.from = () => ({
+    async upload(uploadPath, file) {
+      uploadCount++
+      db.calls.uploads.push({ path: uploadPath, file })
+      if (file.name === 'bad.jpg') return { error: Error('Simulated storage upload failure') }
+      return { error: null }
+    },
+    async remove(paths) { db.calls.removes.push(paths); return { error: null } },
+    async createSignedUrl() { return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
+  })
+  app.setBackend(db)
+  const files = [
+    new File(['a'], 'good1.jpg', { type: 'image/jpeg' }),
+    new File(['b'], 'bad.jpg', { type: 'image/jpeg' }),
+    new File(['c'], 'good2.jpg', { type: 'image/jpeg' })
+  ]
+
+  const results = await app.call('admitDurableReceiptBatch', files, 3)
+
+  assert.equal(uploadCount, 3, 'every file was attempted, one failure did not stop the others')
+  assert.equal(results.filter(r => r.ok).length, 2)
+  assert.equal(results.filter(r => !r.ok).length, 1)
+  await app.call('load')
+  const needsAttention = db.rows.filter(r => r.workflow_status === 'needs_attention')
+  assert.equal(needsAttention.length, 1)
+  assert.equal(db.rows.filter(r => r.workflow_status === 'queued').length, 2)
+})
+
+test('batchAdmissionSummary reports a non-technical success/failure count', () => {
+  const app = loadApp()
+  assert.equal(app.call('batchAdmissionSummary', [{ ok: true }, { ok: true }, { ok: false }]), "2 receipts safely added. 1 could not be added. The others are waiting in Needs Review.")
+  assert.equal(app.call('batchAdmissionSummary', [{ ok: true }]), "1 receipt safely added. They're waiting in Needs Review.")
+})
+
+test('handleLibraryFileSelection keeps the existing single-image OCR flow unchanged', async () => {
+  const app = loadApp(), db = backend([])
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  let reads = 0
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', async () => { reads++; return { supplier: 'APCO Wangaratta', date: '2025-10-23', total: 25.23, gst: 2.29 } })
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+
+  await app.call('handleLibraryFileSelection', [image], app.element('libraryFile'))
+  await waitFor(() => reads === 1)
+  await waitFor(() => app.element('supplier').value === 'APCO Wangaratta')
+
+  assert.equal(db.calls.inserts.length, 0, 'single-image selection does not go through durable admission')
+  assert.equal(db.calls.uploads.length, 0)
+})
+
+test('handleLibraryFileSelection keeps the existing single-PDF manual-entry flow unchanged', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const pdf = new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' })
+
+  await app.call('handleLibraryFileSelection', [pdf], app.element('libraryFile'))
+
+  assert.match(app.element('ocrStatus').textContent, /PDF selected/)
+  assert.equal(db.calls.inserts.length, 0, 'single PDF selection does not go through durable admission')
+})
+
+test('handleLibraryFileSelection admits a multi-image selection as a batch and reports a plain-language summary', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const files = [
+    new File(['a'], 'one.jpg', { type: 'image/jpeg' }),
+    new File(['b'], 'two.jpg', { type: 'image/jpeg' })
+  ]
+
+  await app.call('handleLibraryFileSelection', files, app.element('libraryFile'))
+
+  assert.equal(db.calls.inserts.length, 2)
+  assert.match(app.element('batchStatus').textContent, /2 receipts safely added/)
+  assert.match(app.element('batchStatus').textContent, /waiting in Needs Review/)
+  assert.doesNotMatch(app.element('batchStatus').textContent, /reading|processing|scan/i)
+  assert.equal(app.element('libraryFile').value, '', 'the file input is reset after the batch completes')
+})
+
+test('handleLibraryFileSelection skips PDFs mixed into a multi-file selection and still admits the images', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const files = [
+    new File(['a'], 'one.jpg', { type: 'image/jpeg' }),
+    new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' }),
+    new File(['b'], 'two.jpg', { type: 'image/jpeg' })
+  ]
+
+  await app.call('handleLibraryFileSelection', files, app.element('libraryFile'))
+
+  assert.equal(db.calls.inserts.length, 2, 'only the two images were durably admitted')
+  assert.match(app.element('batchStatus').textContent, /2 receipts safely added/)
+  assert.match(app.element('batchStatus').textContent, /1 PDF was skipped/)
+})
+
+test('handleLibraryFileSelection reports partial-failure feedback with correct "the others" wording', async () => {
+  const app = loadApp(), db = backend([])
+  db.storage.from = () => ({
+    async upload(uploadPath, file) {
+      db.calls.uploads.push({ path: uploadPath, file })
+      if (file.name === 'bad.jpg') return { error: Error('Simulated storage upload failure') }
+      return { error: null }
+    },
+    async remove(paths) { db.calls.removes.push(paths); return { error: null } },
+    async createSignedUrl() { return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
+  })
+  app.setBackend(db)
+  const files = [
+    new File(['a'], 'good1.jpg', { type: 'image/jpeg' }),
+    new File(['b'], 'bad.jpg', { type: 'image/jpeg' }),
+    new File(['c'], 'good2.jpg', { type: 'image/jpeg' })
+  ]
+
+  await app.call('handleLibraryFileSelection', files, app.element('libraryFile'))
+
+  assert.equal(app.element('batchStatus').textContent, '2 receipts safely added. 1 could not be added. The others are waiting in Needs Review.')
+})
+
+test('handleLibraryFileSelection does not call begin_ocr_scan or Gemini for batch admission', async () => {
+  const app = loadApp(), db = backend([])
+  const scanRpcCalls = []
+  let geminiCalls = 0
+  db.rpc = async (name) => { if (name === 'begin_ocr_scan' || name === 'complete_ocr_scan') scanRpcCalls.push(name); return { data: {}, error: null } }
+  app.setBackend(db)
+  app.setFunction('scanReceiptWithGemini', async () => { geminiCalls++; return {} })
+  const files = [
+    new File(['a'], 'one.jpg', { type: 'image/jpeg' }),
+    new File(['b'], 'two.jpg', { type: 'image/jpeg' })
+  ]
+
+  await app.call('handleLibraryFileSelection', files, app.element('libraryFile'))
+
+  assert.equal(scanRpcCalls.length, 0, 'batch admission must never consume OCR entitlement')
+  assert.equal(geminiCalls, 0)
 })
 
 test('normal Receipt Library only shows completed receipts', () => {
