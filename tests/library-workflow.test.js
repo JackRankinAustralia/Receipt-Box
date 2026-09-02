@@ -438,3 +438,149 @@ test('delete requires explicit confirmation and removes the stored attachment an
   assert.deepEqual(db.calls.deletes, ['receipt-1'])
   assert.equal(db.rows.length, 0)
 })
+
+test('normal Receipt Library only shows completed receipts', () => {
+  const app = loadApp()
+  const rows = [
+    receipt({ id: 'completed', workflow_status: 'completed' }),
+    receipt({ id: 'needs-review', workflow_status: 'needs_review' }),
+    receipt({ id: 'needs-attention', workflow_status: 'needs_attention' }),
+    receipt({ id: 'queued', workflow_status: 'queued' }),
+    receipt({ id: 'reading', workflow_status: 'reading' }),
+    receipt({ id: 'uploading', workflow_status: 'uploading' })
+  ]
+  const ids = Array.from(app.call('filterAndSortReceipts', rows, {}), r => r.id)
+  assert.deepEqual(ids, ['completed'])
+})
+
+test('Needs Review includes every non-completed workflow state', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'completed', workflow_status: 'completed' }),
+    receipt({ id: 'needs-review', workflow_status: 'needs_review' }),
+    receipt({ id: 'needs-attention', workflow_status: 'needs_attention' }),
+    receipt({ id: 'queued', workflow_status: 'queued' }),
+    receipt({ id: 'reading', workflow_status: 'reading' }),
+    receipt({ id: 'uploading', workflow_status: 'uploading' })
+  ])
+  const ids = app.call('needsReviewRows').map(r => r.id)
+  assert.deepEqual(ids.sort(), ['needs-attention', 'needs-review', 'queued', 'reading', 'uploading'].sort())
+})
+
+test('Needs Review renders user-facing labels, not raw workflow_status', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'needs-review', workflow_status: 'needs_review', supplier: 'Ready Co', total: 40 }),
+    receipt({ id: 'needs-attention', workflow_status: 'needs_attention', supplier: null, total: null, receipt_date: null }),
+    receipt({ id: 'queued', workflow_status: 'queued', supplier: null, total: null, receipt_date: null }),
+    receipt({ id: 'uploading', workflow_status: 'uploading', supplier: null, total: null, receipt_date: null })
+  ])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  assert.equal(app.element('needsReviewCount').textContent, '4')
+  const html = app.element('needsReviewList').innerHTML
+  assert.match(html, /Ready to review/)
+  assert.match(html, /Needs attention/)
+  assert.match(html, /Processing/)
+  assert.match(html, /Uploading/)
+  assert.equal(html.includes('needs_review'), false)
+  assert.equal(html.includes('needs_attention'), false)
+  assert.match(html, /Unknown supplier/)
+})
+
+test('Review opens the existing Add Receipt form without triggering automatic Gemini', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Draft Supplier' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  let reads = 0
+  app.setFunction('scanReceiptWithGemini', async () => { reads++ })
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.state().receiptMode, 'edit')
+  assert.equal(app.element('saveBtn').dataset.edit, 'needs-review-1')
+  assert.equal(app.element('supplier').value, 'Draft Supplier')
+  assert.equal(app.element('receiptPreview').src, 'https://example.test/receipt')
+  assert.equal(app.element('addReceiptHeading').textContent, 'Review receipt')
+  assert.equal(app.element('reviewBanner').classList.contains('hidden'), false)
+  assert.equal(app.element('saveBtn').textContent, 'Save & complete')
+  assert.equal(reads, 0)
+
+  const [tabbar, , addView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(addView.classList.contains('hidden'), false)
+})
+
+test('Review shows a needs-attention message and still allows manual completion', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'attn-1', workflow_status: 'needs_attention', supplier: 'Blurry Co' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'attn-1')
+
+  assert.match(app.element('reviewBanner').innerHTML, /needs attention/i)
+})
+
+test('saving a reviewed receipt updates the existing row, completes it, and sets reviewed_at', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-2', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-2')
+  fillForm(app)
+
+  await app.call('save')
+
+  assert.equal(db.calls.inserts.length, 0)
+  assert.equal(db.calls.updates.length, 1)
+  assert.equal(db.calls.updates[0].id, 'needs-review-2')
+  assert.equal(db.calls.updates[0].payload.workflow_status, 'completed')
+  assert.match(db.calls.updates[0].payload.reviewed_at, /^\d{4}-\d{2}-\d{2}T/)
+  assert.match(app.element('saveMsg').innerHTML, /Receipt completed/i)
+})
+
+test('a completed review disappears from Needs Review and appears in the normal Library, and the badge updates', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-3', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('load')
+  assert.equal(app.element('needsReviewCount').textContent, '1')
+
+  await app.call('reviewReceipt', 'needs-review-3')
+  fillForm(app)
+  await app.call('save')
+
+  assert.equal(app.element('needsReviewCount').textContent, '0')
+  const libraryIds = Array.from(app.call('filteredRows'), r => r.id)
+  assert.deepEqual(libraryIds, ['needs-review-3'])
+})
+
+test('ordinary completed Edit is unaffected by the review flow', async () => {
+  const app = loadApp(), db = backend([receipt()])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('editReceipt', 'receipt-1')
+
+  assert.equal(app.element('addReceiptHeading').textContent, 'Add receipt')
+  assert.equal(app.element('reviewBanner').classList.contains('hidden'), true)
+  assert.equal(app.element('saveBtn').textContent, 'Update receipt')
+  assert.equal(app.state().receiptMode, 'edit')
+})
+
+test('a still-processing receipt is shown read-only in Needs Review and cannot be reviewed', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'queued-1', workflow_status: 'queued', supplier: null, total: null, receipt_date: null })])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  const html = app.element('needsReviewList').innerHTML
+  assert.match(html, /disabled/)
+  assert.match(html, /Processing/)
+})
