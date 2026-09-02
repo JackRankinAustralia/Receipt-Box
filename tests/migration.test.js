@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url')
 
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821090000_add_user_managed_dimensions.sql'), 'utf8')
 const lifecycleMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260901193000_add_receipt_workflow_lifecycle.sql'), 'utf8')
+const scanAdmissionMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260902180000_add_receipt_scan_admission_fields.sql'), 'utf8')
 
 test('receipt lifecycle migration defaults legacy receipts to completed without changing ownership policies', () => {
   assert.match(lifecycleMigration, /alter table public\.receipts[\s\S]*add column if not exists workflow_status text not null default 'completed'/i)
@@ -14,6 +15,18 @@ test('receipt lifecycle migration defaults legacy receipts to completed without 
   assert.match(lifecycleMigration, /check \(workflow_status in \('uploading', 'queued', 'reading', 'needs_review', 'needs_attention', 'completed'\)\)/i)
   assert.doesNotMatch(lifecycleMigration, /\b(?:create|alter|drop)\s+policy\b/i)
   assert.doesNotMatch(lifecycleMigration, /\b(?:grant|revoke)\b/i)
+})
+
+test('scan admission migration makes supplier nullable and adds only the three approved scan fields', () => {
+  assert.match(scanAdmissionMigration, /alter table public\.receipts[\s\S]*alter column supplier drop not null/i)
+  assert.match(scanAdmissionMigration, /add column if not exists scan_session_id uuid/i)
+  assert.match(scanAdmissionMigration, /add column if not exists scan_started_at timestamptz/i)
+  assert.match(scanAdmissionMigration, /add column if not exists scan_error_summary text/i)
+  assert.doesNotMatch(scanAdmissionMigration, /scan_attempts/i)
+  assert.doesNotMatch(scanAdmissionMigration, /scan_completed_at/i)
+  assert.doesNotMatch(scanAdmissionMigration, /create table/i)
+  assert.doesNotMatch(scanAdmissionMigration, /\b(?:create|alter|drop)\s+policy\b/i)
+  assert.doesNotMatch(scanAdmissionMigration, /\b(?:grant|revoke)\b/i)
 })
 
 test('migration reconciles an already partially-created production schema', () => {

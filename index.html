@@ -447,6 +447,30 @@ function setReviewMode(review,status){
  $('reviewBanner').classList.remove('hidden');
  $('reviewBanner').innerHTML=attention?'<strong>Needs attention.</strong> Automatic reading needs attention, or may have failed. Check and correct the fields below, then save to complete this receipt.':'<strong>Ready to review.</strong> Check the fields below and save to complete this receipt.';
 }
+async function admitDurableReceipt(file){
+ if(!user)throw Error('You must be signed in to add a receipt.');
+ if(!file)throw Error('A receipt image is required.');
+ const id=crypto.randomUUID(),scanSessionId=crypto.randomUUID(),startedAt=new Date().toISOString();
+ const insertResult=await sb.from('receipts').insert({id,user_id:user.id,supplier:null,workflow_status:'uploading',scan_session_id:scanSessionId,scan_started_at:startedAt});
+ if(insertResult.error)throw insertResult.error;
+ const path=user.id+'/'+id+'/'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+ try{
+  const uploadResult=await sb.storage.from('receipts').upload(path,file);
+  if(uploadResult.error)throw uploadResult.error;
+ }catch(uploadError){
+  await sb.from('receipts').update({workflow_status:'needs_attention',scan_error_summary:'Image upload failed.'}).eq('id',id);
+  await load();
+  throw uploadError;
+ }
+ const updateResult=await sb.from('receipts').update({file_path:path,original_filename:file.name,mime_type:file.type,workflow_status:'queued'}).eq('id',id);
+ if(updateResult.error){
+  await sb.from('receipts').update({workflow_status:'needs_attention',scan_error_summary:'Could not save receipt details after upload.'}).eq('id',id);
+  await load();
+  throw updateResult.error;
+ }
+ await load();
+ return id;
+}
 async function deleteReceipt(id){
  const r=allRows.find(x=>x.id===id);if(!r||!confirm('Delete this receipt permanently? This cannot be undone.'))return;
  if(r.file_path)await sb.storage.from('receipts').remove([r.file_path]);

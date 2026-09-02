@@ -53,7 +53,7 @@ function backend(initialRows = []) {
       }
     },
     storage: { from() { return {
-      async upload(path, file) { calls.uploads.push({ path, file }); return { error: null } },
+      async upload(path, file) { calls.uploads.push({ path, file }); if (api.uploadShouldFail) return { error: Error('Simulated storage upload failure') }; return { error: null } },
       async remove(paths) { calls.removes.push(paths); return { error: null } },
       async createSignedUrl() { return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
     } } }
@@ -459,6 +459,88 @@ test('production load path: a needs_review row from the backend is excluded from
   assert.equal(app.element('needsReviewCount').textContent, '1')
   assert.match(app.element('needsReviewList').innerHTML, /CASES/)
   assert.equal(app.element('total').textContent.replace(/[^0-9.]/g, ''), '25.00')
+})
+
+test('admitDurableReceipt creates a durable row first, then uploads, then marks it queued', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const file = new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' })
+
+  const id = await app.call('admitDurableReceipt', file)
+
+  assert.equal(db.calls.inserts.length, 1)
+  assert.equal(db.calls.inserts[0].user_id, 'test-user')
+  assert.equal(db.calls.inserts[0].supplier, null)
+  assert.equal(db.calls.inserts[0].workflow_status, 'uploading')
+  assert.equal(typeof db.calls.inserts[0].scan_session_id, 'string')
+  assert.equal(typeof db.calls.inserts[0].scan_started_at, 'string')
+
+  assert.equal(db.calls.uploads.length, 1)
+  assert.match(db.calls.uploads[0].path, new RegExp('^test-user/' + id + '/receipt\\.jpg$'))
+
+  const row = db.rows.find(r => r.id === id)
+  assert.equal(row.workflow_status, 'queued')
+  assert.equal(row.file_path, db.calls.uploads[0].path)
+  assert.equal(row.supplier, null)
+  assert.equal(row.scan_session_id, db.calls.inserts[0].scan_session_id)
+
+  // Durable across a fresh load(), not merely in-memory.
+  await app.call('load')
+  assert.equal(app.call('needsReviewRows').map(r => r.id).includes(id), true)
+  assert.equal(app.element('needsReviewCount').textContent, '1')
+  assert.match(app.element('needsReviewList').innerHTML, /Processing/)
+
+  // Financially inactive.
+  assert.equal(app.call('filterAndSortReceipts', db.rows, {}).map(r => r.id).includes(id), false)
+  assert.equal(app.call('reportPeriodRows', db.rows, { mode: 'fy' }).map(r => r.id).includes(id), false)
+})
+
+test('admitDurableReceipt keeps the durable row and marks it needs_attention when Storage upload fails', async () => {
+  const app = loadApp(), db = backend([])
+  db.uploadShouldFail = true
+  app.setBackend(db)
+  const file = new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' })
+
+  await assert.rejects(app.call('admitDurableReceipt', file))
+
+  assert.equal(db.rows.length, 1)
+  const row = db.rows[0]
+  assert.equal(row.workflow_status, 'needs_attention')
+  assert.equal(row.scan_error_summary, 'Image upload failed.')
+  assert.equal(row.supplier, null)
+
+  assert.equal(app.call('filterAndSortReceipts', db.rows, {}).map(r => r.id).includes(row.id), false)
+  assert.equal(app.call('reportPeriodRows', db.rows, { mode: 'fy' }).map(r => r.id).includes(row.id), false)
+  const needsReview = app.call('needsReviewRows')
+  assert.equal(needsReview.map(r => r.id).includes(row.id), true)
+})
+
+test('admitDurableReceipt requires a signed-in user and a file', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db, null)
+  await assert.rejects(app.call('admitDurableReceipt', new File(['x'], 'r.jpg', { type: 'image/jpeg' })), /signed in/)
+  assert.equal(db.calls.inserts.length, 0)
+})
+
+test('the stored image for a durably admitted receipt can later be opened', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const id = await app.call('admitDurableReceipt', new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' }))
+  await app.call('load')
+  await app.call('viewFile', id)
+  assert.equal(db.calls.uploads.length, 1)
+})
+
+test('durable admission does not disturb existing completed receipts or the ordinary Edit/Review flows', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'completed-1', workflow_status: 'completed' })])
+  app.setBackend(db)
+  await app.call('load')
+  await app.call('admitDurableReceipt', new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' }))
+
+  const completedRow = db.rows.find(r => r.id === 'completed-1')
+  assert.equal(completedRow.workflow_status, 'completed')
+  assert.equal(completedRow.supplier, 'Alpha Supplies')
+  assert.equal(JSON.stringify(app.call('filterAndSortReceipts', db.rows, {}).map(r => r.id)), JSON.stringify(['completed-1']))
 })
 
 test('normal Receipt Library only shows completed receipts', () => {

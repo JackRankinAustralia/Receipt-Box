@@ -75,7 +75,7 @@ function loadApp() {
     URL: TestURL,
     Blob,
     File: globalThis.File,
-    crypto: { randomUUID: () => 'new-receipt-id' },
+    crypto: { randomUUID: (() => { let n = 0; return () => n++ === 0 ? 'new-receipt-id' : `new-receipt-id-${n}` })() },
     setTimeout() {},
     confirm() { return confirmResult },
     prompt() { return null },
