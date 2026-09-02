@@ -439,6 +439,28 @@ test('delete requires explicit confirmation and removes the stored attachment an
   assert.equal(db.rows.length, 0)
 })
 
+test('production load path: a needs_review row from the backend is excluded from Library/reports and appears in Needs Review', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'completed-row', workflow_status: 'completed', total: 25, gst: 2.27 }),
+    receipt({ id: 'cases-row', workflow_status: 'needs_review', supplier: 'CASES', total: 1, gst: 0.09 })
+  ])
+  app.setBackend(db)
+
+  // Exercises the exact sb.from('receipts').select('*')... path used in production load().
+  await app.call('load')
+
+  assert.equal(JSON.stringify(app.call('filterAndSortReceipts', db.rows, {}).map(r => r.id)), JSON.stringify(['completed-row']))
+  assert.equal(JSON.stringify(app.call('needsReviewRows').map(r => r.id)), JSON.stringify(['cases-row']))
+
+  const fyRows = app.call('reportPeriodRows', db.rows, { mode: 'fy' })
+  assert.equal(JSON.stringify(fyRows.map(r => r.id)), JSON.stringify(['completed-row']))
+
+  assert.equal(app.element('needsReviewCount').textContent, '1')
+  assert.match(app.element('needsReviewList').innerHTML, /CASES/)
+  assert.equal(app.element('total').textContent.replace(/[^0-9.]/g, ''), '25.00')
+})
+
 test('normal Receipt Library only shows completed receipts', () => {
   const app = loadApp()
   const rows = [

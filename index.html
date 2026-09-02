@@ -429,6 +429,7 @@ async function editReceipt(id,options={}){
  $('supplier').value=r.supplier||'';$('date').value=r.receipt_date||'';$('amount').value=r.total??'';$('gst').value=r.gst??'';
  $('entity').value=r.entity_name||defaultSetting('entities')?.name||'';$('category').value=r.category_name||defaultSetting('categories')?.name||'';$('project').value=r.project_name||'';$('notes').value=r.notes||'';
  setReceiptMode('edit',id);editingExistingReceipt=true;dateTouched=true;categoryTouched=true;$('receiptPreview').removeAttribute('src');$('receiptPreview').style.transform='';$('previewFrame').style.display='none';$('fileName').textContent=r.file_path?'Attached: '+attachmentFilename(r):'';
+ if(review)$('dateDetection').textContent='';
  setReviewMode(review,r.workflow_status);
  $('saveMsg').textContent=review?'Reviewing '+(r.supplier||'receipt')+'.':'Editing '+(r.supplier||'receipt')+'.';activateMainTab('add');window.scrollTo({top:0,behavior:'smooth'});
  if(!r.file_path||!String(r.mime_type||'').startsWith('image/'))return;
