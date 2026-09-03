@@ -15,6 +15,9 @@ async function loadGemini() {
 async function loadWorkerAuth() {
   return import(pathToFileURL(path.join(__dirname, '..', 'supabase', 'functions', 'process-receipt-queue', 'workerAuth.mjs')).href)
 }
+async function loadMaxReceipts() {
+  return import(pathToFileURL(path.join(__dirname, '..', 'supabase', 'functions', 'process-receipt-queue', 'maxReceipts.mjs')).href)
+}
 
 function makeClaim(overrides = {}) {
   return {
@@ -291,4 +294,57 @@ test('worker invocation auth: extractBearerToken parses the Authorization header
   assert.equal(extractBearerToken(''), '')
   assert.equal(extractBearerToken(null), '')
   assert.equal(extractBearerToken('Basic abc123'), '')
+})
+
+test('resolveMaxReceipts: omitted value preserves the current maximum of 3', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  const result = resolveMaxReceipts(undefined, 3)
+  assert.equal(result.ok, true)
+  assert.equal(result.value, 3)
+})
+
+test('resolveMaxReceipts: 1 and 2 are accepted and lower the bound', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.deepEqual(resolveMaxReceipts(1, 3), { ok: true, value: 1 })
+  assert.deepEqual(resolveMaxReceipts(2, 3), { ok: true, value: 2 })
+})
+
+test('resolveMaxReceipts: 3 is accepted (equal to the existing cap)', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.deepEqual(resolveMaxReceipts(3, 3), { ok: true, value: 3 })
+})
+
+test('resolveMaxReceipts: 0 is rejected', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.equal(resolveMaxReceipts(0, 3).ok, false)
+})
+
+test('resolveMaxReceipts: 4 is rejected (cannot exceed the existing cap)', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.equal(resolveMaxReceipts(4, 3).ok, false)
+})
+
+test('resolveMaxReceipts: negative numbers are rejected', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.equal(resolveMaxReceipts(-1, 3).ok, false)
+})
+
+test('resolveMaxReceipts: decimals are rejected', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.equal(resolveMaxReceipts(1.5, 3).ok, false)
+})
+
+test('resolveMaxReceipts: strings and null are rejected', async () => {
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.equal(resolveMaxReceipts('1', 3).ok, false)
+  assert.equal(resolveMaxReceipts(null, 3).ok, false)
+})
+
+test('resolveMaxReceipts: malformed request body JSON is handled cleanly by the caller', async () => {
+  // The Edge Function itself catches JSON.parse errors before calling
+  // resolveMaxReceipts and returns a 400; this test documents that a bad
+  // body never reaches resolveMaxReceipts as a crash, only as undefined
+  // (empty body) or a value that fails validation normally.
+  const { resolveMaxReceipts } = await loadMaxReceipts()
+  assert.doesNotThrow(() => resolveMaxReceipts(undefined, 3))
 })

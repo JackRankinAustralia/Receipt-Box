@@ -4,6 +4,7 @@ import { processReceiptQueueBatch } from "./workflow.mjs";
 import { callGeminiForReceipt, extractMeaningfulReceiptFields } from "./geminiReceiptScan.mjs";
 import { normaliseAustralianReceiptDate } from "./receiptDates.mjs";
 import { isAuthorisedWorkerRequest, extractBearerToken } from "./workerAuth.mjs";
+import { resolveMaxReceipts } from "./maxReceipts.mjs";
 
 // This function is invoked by Supabase Cron (Stage 3D-C) or manually by an
 // operator holding the dedicated worker secret. It is NEVER intended to be
@@ -35,6 +36,24 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ error: "Not authorised." }), { status: 401, headers: { ...cors, "Content-Type": "application/json" } });
   }
 
+  // Optional maxReceipts request body field, used only for controlled manual
+  // testing (e.g. {"maxReceipts":1}). Omitted/empty body => unchanged current behaviour.
+  const rawBody = await request.text();
+  let requestedMaxReceipts: unknown;
+  if (rawBody.trim().length > 0) {
+    let parsedBody: Record<string, unknown>;
+    try {
+      parsedBody = JSON.parse(rawBody);
+    } catch {
+      return new Response(JSON.stringify({ error: "Request body must be valid JSON." }), { status: 400, headers: { ...cors, "Content-Type": "application/json" } });
+    }
+    requestedMaxReceipts = parsedBody?.maxReceipts;
+  }
+  const maxReceiptsResult = resolveMaxReceipts(requestedMaxReceipts, MAX_RECEIPTS_PER_INVOCATION);
+  if (!maxReceiptsResult.ok) {
+    return new Response(JSON.stringify({ error: maxReceiptsResult.error }), { status: 400, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
   const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
@@ -51,7 +70,7 @@ Deno.serve(async (request) => {
 
   try {
     const summary = await processReceiptQueueBatch({
-      maxReceipts: MAX_RECEIPTS_PER_INVOCATION,
+      maxReceipts: maxReceiptsResult.value,
       generateSessionId: () => crypto.randomUUID(),
       log,
       claimNext: async (sessionId: string) => {
