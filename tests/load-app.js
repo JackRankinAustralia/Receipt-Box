@@ -46,7 +46,8 @@ function loadApp() {
       insertBefore(child, reference) { const index = this.children.indexOf(reference); this.children.splice(index < 0 ? this.children.length : index, 0, child); return child },
       prepend(child) { this.children.unshift(child); return child },
       removeAttribute(name) { delete this[name] },
-      setAttribute(name, value) { this[name] = value }
+      setAttribute(name, value) { this[name] = value },
+      click() { this.clickCount = (this.clickCount || 0) + 1 }
     }
   }
   elements.mainArea = makeElement()

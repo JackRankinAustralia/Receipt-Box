@@ -1328,3 +1328,174 @@ test('normal Add Receipt save behavior and validation message are unchanged outs
   assert.equal(saved.addAnother, true)
   assert.equal(db.calls.inserts.length, 1)
 })
+
+test('camera capture durably admits the first receipt without calling browser-side Gemini', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  let geminiCalled = false
+  app.setFunction('scanReceiptWithGemini', async () => { geminiCalled = true })
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+
+  await app.call('handleCameraCapture')
+
+  assert.equal(db.calls.inserts.length, 1)
+  assert.equal(db.rows[0].workflow_status, 'queued')
+  assert.equal(geminiCalled, false, 'rapid camera admission never calls browser Gemini')
+})
+
+test('after successful admission the post-capture choice appears with count 1', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+
+  await app.call('handleCameraCapture')
+
+  assert.equal(app.element('rapidCaptureCard').classList.contains('hidden'), false)
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /1 receipt safely added\./)
+})
+
+test('Take another receipt reopens the camera capture input', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+  await app.call('handleCameraCapture')
+
+  app.call('rapidCaptureTakeAnother')
+
+  assert.equal(app.element('cameraFile').clickCount, 1, 'the native camera input is re-invoked')
+})
+
+test('a second successful capture increments the count to 2 without waiting for the first receipt to finish OCR', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image1 = new File([new Uint8Array([1])], 'receipt1.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image1]
+  await app.call('handleCameraCapture')
+  assert.equal(app.state().reviewMode, false)
+
+  const image2 = new File([new Uint8Array([2])], 'receipt2.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image2]
+  await app.call('handleCameraCapture')
+
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /2 receipts safely added\./)
+  assert.equal(db.calls.inserts.length, 2)
+  assert.equal(db.rows.filter(r => r.workflow_status === 'queued').length, 2, 'both receipts are queued for background OCR independently')
+})
+
+test('Done navigates to Receipts/Needs Review with Receipts active and clears camera-session state', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+  await app.call('handleCameraCapture')
+  app.run("window.scrollTo = () => { __scrolled = true }")
+  app.run('__scrolled = false')
+
+  await app.call('rapidCaptureFinish')
+
+  const [tabbar, , , , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(receiptsView.classList.contains('hidden'), false)
+  assert.equal(app.run('__scrolled'), true)
+  assert.equal(app.element('rapidCaptureCard').classList.contains('hidden'), true)
+})
+
+test('a later new camera session starts the count from zero', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+  await app.call('handleCameraCapture')
+  await app.call('rapidCaptureFinish')
+
+  const image2 = new File([new Uint8Array([2])], 'receipt2.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image2]
+  await app.call('handleCameraCapture')
+
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /1 receipt safely added\./)
+})
+
+test('cancelling a subsequent camera selection does not create a receipt or increment the count', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+  await app.call('handleCameraCapture')
+  assert.equal(db.calls.inserts.length, 1)
+
+  app.element('cameraFile').files = [] // user cancelled the native camera
+  await app.call('handleCameraCapture')
+
+  assert.equal(db.calls.inserts.length, 1, 'no additional receipt was admitted on cancel')
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /1 receipt safely added\./, 'count is unaffected by a cancelled capture')
+})
+
+test('an admission/upload failure is represented durably and does not count as a successful receipt', async () => {
+  const app = loadApp(), db = backend([])
+  db.uploadShouldFail = true
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+
+  await app.call('handleCameraCapture')
+
+  assert.equal(db.rows.length, 1)
+  assert.equal(db.rows[0].workflow_status, 'needs_attention')
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /could not be added safely/i)
+  assert.doesNotMatch(app.element('rapidCaptureStatus').innerHTML, /1 receipt safely added/)
+})
+
+test('repeated/double invocation of the same capture cannot duplicate admission', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+
+  await Promise.all([app.call('handleCameraCapture'), app.call('handleCameraCapture')])
+
+  assert.equal(db.calls.inserts.length, 1, 'the in-progress guard prevents a duplicate admission')
+})
+
+test('existing single-image photo-library workflow remains unchanged by rapid camera capture', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', () => new Promise(() => {}))
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+
+  await app.call('handleLibraryFileSelection', [image], app.element('libraryFile'))
+
+  assert.equal(app.element('rapidCaptureStatus').innerHTML, '', 'library selection never opens the rapid-capture UI')
+  assert.equal(app.state().receiptMode, 'create')
+})
+
+test('existing multi-image library workflow remains unchanged by rapid camera capture', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  const files = [
+    new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' }),
+    new File([new Uint8Array([2])], 'b.jpg', { type: 'image/jpeg' })
+  ]
+
+  await app.call('handleLibraryFileSelection', files, app.element('libraryFile'))
+
+  assert.equal(db.calls.inserts.length, 2)
+  assert.equal(app.element('rapidCaptureStatus').innerHTML, '')
+})
+
+test('existing Review workflow remains unchanged by rapid camera capture', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('addReceiptHeading').textContent, 'Review receipt')
+  assert.equal(app.element('rapidCaptureCard').classList.contains('hidden'), true)
+})
