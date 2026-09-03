@@ -770,6 +770,24 @@ test('Needs Review renders user-facing labels, not raw workflow_status', async (
   assert.match(html, /Unknown supplier/)
 })
 
+test('Processing badge shows an animated spinner for active states; Ready to review and Needs attention stay static', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'needs-review', workflow_status: 'needs_review', supplier: 'Ready Co', total: 40 }),
+    receipt({ id: 'needs-attention', workflow_status: 'needs_attention', supplier: null, total: null, receipt_date: null }),
+    receipt({ id: 'queued', workflow_status: 'queued', supplier: null, total: null, receipt_date: null }),
+    receipt({ id: 'reading', workflow_status: 'reading', supplier: null, total: null, receipt_date: null }),
+    receipt({ id: 'uploading', workflow_status: 'uploading', supplier: null, total: null, receipt_date: null })
+  ])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  const html = app.element('needsReviewList').innerHTML
+  const spinnerCount = (html.match(/class="statusspinner"/g) || []).length
+  assert.equal(spinnerCount, 2, 'only the two active-processing rows (queued, reading) get a spinner')
+})
+
 test('Review opens the existing Add Receipt form without triggering automatic Gemini', async () => {
   const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Draft Supplier' })])
   app.setBackend(db)
@@ -1353,7 +1371,7 @@ test('after successful admission the post-capture choice appears with count 1', 
   await app.call('handleCameraCapture')
 
   assert.equal(app.element('rapidCaptureCard').classList.contains('hidden'), false)
-  assert.match(app.element('rapidCaptureStatus').innerHTML, /1 receipt safely added\./)
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /1 receipt safely added\. Auto scan underway\./)
 })
 
 test('Take another receipt reopens the camera capture input', async () => {
@@ -1380,7 +1398,7 @@ test('a second successful capture increments the count to 2 without waiting for 
   app.element('cameraFile').files = [image2]
   await app.call('handleCameraCapture')
 
-  assert.match(app.element('rapidCaptureStatus').innerHTML, /2 receipts safely added\./)
+  assert.match(app.element('rapidCaptureStatus').innerHTML, /2 receipts safely added\. Auto scan underway\./)
   assert.equal(db.calls.inserts.length, 2)
   assert.equal(db.rows.filter(r => r.workflow_status === 'queued').length, 2, 'both receipts are queued for background OCR independently')
 })
