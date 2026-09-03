@@ -813,6 +813,49 @@ test('Review opens the existing Add Receipt form without triggering automatic Ge
   assert.equal(addView.classList.contains('hidden'), false)
 })
 
+test('New receipt / Clear form from Review mode exits review and switches to Add Receipt', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Draft Supplier' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+  assert.equal(app.state().reviewMode, true)
+  const [tabbarBefore] = app.element('mainArea').children
+  assert.equal(tabbarBefore.children[1].classList.contains('active'), true, 'Receipts tab active while reviewing')
+
+  app.call('resetReceiptForm')
+
+  assert.equal(app.state().reviewMode, false)
+  assert.equal(app.state().receiptMode, 'create')
+  const [tabbar, , addView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true, 'Add Receipt tab becomes active')
+  assert.equal(tabbar.children[1].classList.contains('active'), false, 'Receipts tab no longer active')
+  assert.equal(addView.classList.contains('hidden'), false, 'Add Receipt view is shown')
+  assert.equal(app.element('addReceiptHeading').textContent, 'Add receipt')
+  assert.equal(app.element('saveAnotherBtn').textContent, 'Save & add another')
+  assert.equal(app.element('reviewBanner').classList.contains('hidden'), true)
+  assert.equal(app.element('supplierError').classList.contains('hidden'), true)
+  assert.equal(app.element('dateError').classList.contains('hidden'), true)
+  assert.equal(app.element('amountError').classList.contains('hidden'), true)
+})
+
+test('New receipt / Clear form in ordinary Add Receipt mode keeps existing behavior', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  await app.call('loadSettings')
+  app.element('supplier').value = 'Some Supplier'
+
+  app.call('resetReceiptForm')
+
+  assert.equal(app.state().reviewMode, false)
+  assert.equal(app.state().receiptMode, 'create')
+  const [tabbar, , addView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true, 'Add Receipt tab remains active')
+  assert.equal(addView.classList.contains('hidden'), false)
+  assert.equal(app.element('supplier').value, '')
+})
+
 test('Review shows a needs-attention message and still allows manual completion', async () => {
   const app = loadApp(), db = backend([receipt({ id: 'attn-1', workflow_status: 'needs_attention', supplier: 'Blurry Co' })])
   app.setBackend(db)
