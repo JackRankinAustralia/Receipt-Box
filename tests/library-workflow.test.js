@@ -1023,3 +1023,114 @@ test('retryFailedUpload on failure keeps the row needs_attention and retains met
   assert.equal(row.original_filename, 'receipt.jpg')
   assert.equal(row.mime_type, 'image/jpeg')
 })
+
+test('Save & complete in review mode returns to Receipts, refreshes data, and scrolls to top', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  fillForm(app)
+  let scrolled = false
+  app.run("window.scrollTo = () => { __scrolled = true }")
+  app.run('__scrolled = false')
+
+  await app.call('save')
+
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true, 'Receipts tab is now active')
+  assert.equal(addView.classList.contains('hidden'), true)
+  assert.equal(receiptsView.classList.contains('hidden'), false)
+  assert.equal(app.run('__scrolled'), true, 'view scrolled to top after returning to Receipts')
+
+  // Refreshed data: completed receipt no longer in Needs Review.
+  assert.equal(app.element('needsReviewCount').textContent, '0')
+  assert.equal(db.rows.find(r => r.id === 'needs-review-1').workflow_status, 'completed')
+})
+
+test('outside review mode, saveAnotherBtn keeps the "Save & add another" label and behavior', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  await app.call('loadSettings')
+  app.call('resetReceiptForm')
+
+  assert.equal(app.element('saveAnotherBtn').textContent, 'Save & add another')
+
+  fillForm(app)
+  const result = await app.call('save', { addAnother: true })
+
+  assert.equal(result.addAnother, true)
+  assert.equal(app.state().receiptMode, 'create', 'form resets for a new receipt, not the review workflow')
+  assert.match(app.element('saveMsg').innerHTML, /Ready for the next receipt/i)
+  const [tabbar] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true, 'stays on Add Receipt tab, unlike review mode')
+})
+
+test('in review mode, saveAnotherBtn label changes to "Save & review next"', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('saveAnotherBtn').textContent, 'Save & review next')
+})
+
+test('Save & review next opens the next reviewable receipt directly when one exists', async () => {
+  const app = loadApp(), db = backend([
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'First Co' }),
+    receipt({ id: 'needs-review-2', workflow_status: 'needs_review', supplier: 'Second Co' })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  fillForm(app)
+
+  await app.call('save', { addAnother: true })
+
+  assert.equal(app.element('saveBtn').dataset.edit, 'needs-review-2', 'the next reviewable receipt is now open for review')
+  assert.equal(app.state().receiptMode, 'edit')
+  assert.equal(app.element('addReceiptHeading').textContent, 'Review receipt')
+  const [tabbar, , addView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true, 'Add Receipt tab (which hosts the review form) is active')
+  assert.equal(addView.classList.contains('hidden'), false)
+})
+
+test('Save & review next returns to Receipts at top when no reviewable receipts remain', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  fillForm(app)
+  app.run("window.scrollTo = () => { __scrolled = true }")
+  app.run('__scrolled = false')
+
+  await app.call('save', { addAnother: true })
+
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(addView.classList.contains('hidden'), true)
+  assert.equal(receiptsView.classList.contains('hidden'), false)
+  assert.equal(app.run('__scrolled'), true)
+})
+
+test('review-mode save transitions do not create a duplicate receipt row or a second write', async () => {
+  const app = loadApp(), db = backend([
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review' }),
+    receipt({ id: 'needs-review-2', workflow_status: 'needs_review' })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  fillForm(app)
+
+  await app.call('save', { addAnother: true })
+
+  assert.equal(db.calls.inserts.length, 0)
+  assert.equal(db.calls.updates.length, 1)
+  assert.equal(db.rows.length, 2, 'no duplicate rows were created during the review-to-review-next transition')
+})
