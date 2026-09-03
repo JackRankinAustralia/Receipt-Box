@@ -864,3 +864,162 @@ test('a still-processing receipt is shown read-only in Needs Review and cannot b
   assert.match(html, /disabled/)
   assert.match(html, /Processing/)
 })
+
+test('background polling starts when uploading/queued/reading receipts exist and stops once they clear', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'q-1', workflow_status: 'queued', supplier: null, total: null, receipt_date: null })])
+  app.setBackend(db)
+
+  await app.call('load')
+  assert.equal(app.pendingTimeoutCount(), 1, 'a poll timer is scheduled while a receipt is in flight')
+
+  // Resolve the in-flight receipt before the scheduled poll fires.
+  const row = db.rows.find(r => r.id === 'q-1')
+  Object.assign(row, { workflow_status: 'needs_review', supplier: 'Resolved Supplier', total: 12, receipt_date: '2026-08-10' })
+
+  await app.flushTimeouts()
+
+  assert.match(app.element('needsReviewList').innerHTML, /Ready to review/)
+  assert.equal(app.pendingTimeoutCount(), 0, 'no further poll is scheduled once nothing remains in flight')
+})
+
+test('background polling does not create duplicate timers across repeated load() calls', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'q-1', workflow_status: 'reading', supplier: null, total: null, receipt_date: null })])
+  app.setBackend(db)
+
+  await app.call('load')
+  await app.call('load')
+  await app.call('load')
+
+  assert.equal(app.pendingTimeoutCount(), 1, 'only one poll timer is ever scheduled at a time')
+})
+
+test('background polling does not start when no receipts are uploading/queued/reading', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'completed-1', workflow_status: 'completed' })])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  assert.equal(app.pendingTimeoutCount(), 0)
+})
+
+test('signing out stops any pending background poll timer', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'q-1', workflow_status: 'queued', supplier: null, total: null, receipt_date: null })])
+  app.setBackend(db)
+
+  await app.call('load')
+  assert.equal(app.pendingTimeoutCount(), 1)
+
+  app.call('clearPrivateApplicationData')
+
+  assert.equal(app.pendingTimeoutCount(), 0)
+})
+
+test('batch admission never shows the single-image "Reading your receipt…" wording, even after a prior single-image selection left it visible', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  app.element('ocrStatus').textContent = 'Reading your receipt…'
+  const files = [
+    new File(['a'], 'one.jpg', { type: 'image/jpeg' }),
+    new File(['b'], 'two.jpg', { type: 'image/jpeg' })
+  ]
+
+  await app.call('handleLibraryFileSelection', files, app.element('libraryFile'))
+
+  assert.doesNotMatch(app.element('ocrStatus').textContent, /Reading your receipt/)
+  assert.doesNotMatch(app.element('batchStatus').textContent, /Reading your receipt/)
+})
+
+test('single-image immediate OCR wording remains unchanged', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', () => new Promise(() => {})) // never resolves during assertion window
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('cameraFile').files = [image]
+
+  await app.call('handleReceiptFileInput', app.element('cameraFile'), app.element('libraryFile'))
+  app.call('readReceiptWithGemini') // fire-and-forget; assert status text set synchronously before Gemini resolves
+
+  await waitFor(() => app.element('ocrStatus').textContent === 'Reading your receipt…')
+  assert.equal(app.element('ocrStatus').textContent, 'Reading your receipt…')
+})
+
+test('a failed upload retains original_filename and mime_type on the needs_attention row', async () => {
+  const app = loadApp(), db = backend([])
+  db.uploadShouldFail = true
+  app.setBackend(db)
+  const file = new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' })
+
+  await assert.rejects(app.call('admitDurableReceipt', file))
+
+  const row = db.rows[0]
+  assert.equal(row.workflow_status, 'needs_attention')
+  assert.equal(row.original_filename, 'receipt.jpg')
+  assert.equal(row.mime_type, 'image/jpeg')
+})
+
+test('a needs_attention row with no attachment exposes a Retry upload action', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'failed-1', workflow_status: 'needs_attention', supplier: null, total: null, receipt_date: null, file_path: null, original_filename: null, mime_type: null, scan_error_summary: 'Image upload failed.' })])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  const html = app.element('needsReviewList').innerHTML
+  assert.match(html, /Retry upload/)
+  assert.match(html, /attachment failed to upload/i)
+})
+
+test('a needs_attention row that already has a file_path does not show a Retry upload action', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'failed-2', workflow_status: 'needs_attention', supplier: null, total: null, receipt_date: null })])
+  app.setBackend(db)
+
+  await app.call('load')
+
+  assert.doesNotMatch(app.element('needsReviewList').innerHTML, /Retry upload/)
+})
+
+test('retryFailedUpload on success re-uploads to the deterministic path, resets error, and queues for background OCR without calling Gemini', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'failed-1', workflow_status: 'needs_attention', supplier: null, total: null, receipt_date: null, file_path: null, original_filename: null, mime_type: null, scan_error_summary: 'Image upload failed.', scan_session_id: 'session-1' })])
+  app.setBackend(db)
+  let geminiCalled = false
+  app.setFunction('scanReceiptWithGemini', async () => { geminiCalled = true; return {} })
+  const file = new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' })
+
+  await app.call('load')
+  await app.call('retryFailedUpload', 'failed-1', file)
+
+  const row = db.rows.find(r => r.id === 'failed-1')
+  assert.equal(row.workflow_status, 'queued')
+  assert.equal(row.scan_error_summary, null)
+  assert.match(row.file_path, /^test-user\/failed-1\/receipt\.jpg$/)
+  assert.equal(row.original_filename, 'receipt.jpg')
+  assert.equal(row.mime_type, 'image/jpeg')
+  assert.equal(row.scan_session_id, 'session-1', 'existing scan_session_id is preserved')
+  assert.equal(geminiCalled, false, 'retry never calls browser Gemini OCR directly')
+  assert.equal(db.calls.uploads.length, 1)
+})
+
+test('retryFailedUpload on failure keeps the row needs_attention and retains metadata without deleting it', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'failed-1', workflow_status: 'needs_attention', supplier: null, total: null, receipt_date: null, file_path: null, original_filename: null, mime_type: null, scan_error_summary: 'Image upload failed.' })])
+  db.uploadShouldFail = true
+  app.setBackend(db)
+  const file = new File(['image-bytes'], 'receipt.jpg', { type: 'image/jpeg' })
+
+  await app.call('load')
+  await assert.rejects(app.call('retryFailedUpload', 'failed-1', file))
+
+  assert.equal(db.rows.length, 1)
+  const row = db.rows[0]
+  assert.equal(row.workflow_status, 'needs_attention')
+  assert.equal(row.original_filename, 'receipt.jpg')
+  assert.equal(row.mime_type, 'image/jpeg')
+})

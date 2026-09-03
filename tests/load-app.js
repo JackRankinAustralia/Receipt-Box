@@ -61,6 +61,8 @@ function loadApp() {
   }
   let confirmResult = true
   const revokedObjectUrls = []
+  let timeoutCounter = 0
+  const scheduledTimeouts = new Map()
   class TestURL extends URL {
     static createObjectURL() { return 'blob:test-receipt-preview' }
     static revokeObjectURL(value) { revokedObjectUrls.push(value) }
@@ -76,7 +78,14 @@ function loadApp() {
     Blob,
     File: globalThis.File,
     crypto: { randomUUID: (() => { let n = 0; return () => n++ === 0 ? 'new-receipt-id' : `new-receipt-id-${n}` })() },
-    setTimeout() {},
+    setTimeout(fn, ms) {
+      const id = ++timeoutCounter
+      scheduledTimeouts.set(id, { fn, ms })
+      return id
+    },
+    clearTimeout(id) {
+      scheduledTimeouts.delete(id)
+    },
     confirm() { return confirmResult },
     prompt() { return null },
     location: { origin: 'https://example.test', pathname: '/' },
@@ -147,6 +156,16 @@ function loadApp() {
     },
     element(id) {
       return elements[id] || (elements[id] = makeElement())
+    },
+    pendingTimeoutCount() {
+      return scheduledTimeouts.size
+    },
+    async flushTimeouts() {
+      const entries = [...scheduledTimeouts.entries()]
+      scheduledTimeouts.clear()
+      for (const [, { fn }] of entries) {
+        await fn()
+      }
     }
   }
 }
