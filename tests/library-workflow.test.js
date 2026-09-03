@@ -790,7 +790,8 @@ test('Review opens the existing Add Receipt form without triggering automatic Ge
   assert.equal(reads, 0)
 
   const [tabbar, , addView] = app.element('mainArea').children
-  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(tabbar.children[0].classList.contains('active'), false)
   assert.equal(addView.classList.contains('hidden'), false)
 })
 
@@ -1094,7 +1095,7 @@ test('Save & review next opens the next reviewable receipt directly when one exi
   assert.equal(app.state().receiptMode, 'edit')
   assert.equal(app.element('addReceiptHeading').textContent, 'Review receipt')
   const [tabbar, , addView] = app.element('mainArea').children
-  assert.equal(tabbar.children[0].classList.contains('active'), true, 'Add Receipt tab (which hosts the review form) is active')
+  assert.equal(tabbar.children[1].classList.contains('active'), true, 'Receipts tab stays active while reviewing')
   assert.equal(addView.classList.contains('hidden'), false)
 })
 
@@ -1133,4 +1134,197 @@ test('review-mode save transitions do not create a duplicate receipt row or a se
   assert.equal(db.calls.inserts.length, 0)
   assert.equal(db.calls.updates.length, 1)
   assert.equal(db.rows.length, 2, 'no duplicate rows were created during the review-to-review-next transition')
+})
+
+test('Review keeps the Receipts tab visually active while normal Add Receipt keeps Add Receipt active', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+  let [tabbar] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true, 'Receipts tab active during review')
+  assert.equal(tabbar.children[0].classList.contains('active'), false)
+
+  app.call('resetReceiptForm')
+  app.call('activateMainTab', 'add')
+  ;[tabbar] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true, 'Add Receipt tab active for normal add-receipt use')
+})
+
+test('reviewMode displays "Save & review next", and leaving reviewMode restores normal add-another wording', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+  assert.equal(app.element('saveAnotherBtn').textContent, 'Save & review next')
+
+  // Root cause regression guard: setReceiptMode must not clobber the review-mode label when
+  // reviewMode is left off before the mode's base label is applied (order-of-operations bug).
+  app.call('resetReceiptForm')
+  assert.equal(app.element('saveAnotherBtn').textContent, 'Save & add another')
+  assert.equal(app.state().reviewMode, false)
+})
+
+test('review form immediately marks a missing required Date while Supplier and Total remain normal', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'BP Glenrowan Northbound', total: 20.02, receipt_date: null })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('date').classList.contains('field-error'), true)
+  assert.equal(app.element('dateError').classList.contains('hidden'), false)
+  assert.equal(app.element('dateError').textContent, 'Date needs checking')
+  assert.equal(app.element('supplier').classList.contains('field-error'), false)
+  assert.equal(app.element('amount').classList.contains('field-error'), false)
+})
+
+test('entering a valid Date clears its error state, and clearing it again restores the error state', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'BP', total: 20.02, receipt_date: null })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  assert.equal(app.element('date').classList.contains('field-error'), true)
+
+  app.element('date').value = '2026-01-01'
+  app.call('syncFieldValidationErrors')
+  assert.equal(app.element('date').classList.contains('field-error'), false)
+  assert.equal(app.element('dateError').classList.contains('hidden'), true)
+
+  app.element('date').value = ''
+  app.call('syncFieldValidationErrors')
+  assert.equal(app.element('date').classList.contains('field-error'), true)
+  assert.equal(app.element('dateError').classList.contains('hidden'), false)
+})
+
+test('optional empty fields (GST, Entity, Category, Project, Notes) are never marked as errors in review mode', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', gst: null, entity_name: '', category_name: '', project_name: '', notes: '' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('gst').classList.contains('field-error'), false)
+  assert.equal(app.element('entity').classList.contains('field-error'), false)
+  assert.equal(app.element('category').classList.contains('field-error'), false)
+  assert.equal(app.element('project').classList.contains('field-error'), false)
+  assert.equal(app.element('notes').classList.contains('field-error'), false)
+})
+
+test('save validation message is specific to only the missing field(s)', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'BP', total: 20.02, receipt_date: null })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  const result = await app.call('save')
+
+  assert.equal(result, undefined, 'save is rejected while a required field is missing')
+  assert.equal(app.element('saveMsg').textContent, 'Date is required.')
+  assert.equal(db.calls.updates.length, 0, 'no write occurs on failed validation')
+})
+
+test('save validation message lists two missing fields with natural grammar', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: '', total: 20.02, receipt_date: null })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  await app.call('save')
+
+  assert.equal(app.element('saveMsg').textContent, 'Supplier and date are required.')
+})
+
+test('save validation message lists all three missing fields with natural grammar', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: '', total: null, receipt_date: null })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  await app.call('save')
+
+  assert.equal(app.element('saveMsg').textContent, 'Supplier, date and total are required.')
+})
+
+test('failed validation keeps Receipts tab active, keeps review mode, and does not complete the receipt', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', receipt_date: null })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  await app.call('save')
+
+  assert.equal(app.state().reviewMode, true)
+  const [tabbar] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(db.rows.find(r => r.id === 'needs-review-1').workflow_status, 'needs_review')
+})
+
+test('Save & review next still opens the next reviewable receipt after the review-navigation changes', async () => {
+  const app = loadApp(), db = backend([
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'First Co' }),
+    receipt({ id: 'needs-review-2', workflow_status: 'needs_review', supplier: 'Second Co' })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  fillForm(app)
+
+  await app.call('save', { addAnother: true })
+
+  assert.equal(app.element('saveBtn').dataset.edit, 'needs-review-2')
+  const [tabbar] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true, 'Receipts tab remains active for the next review')
+})
+
+test('Save & complete still returns to Receipts at the top after the review-navigation changes', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+  fillForm(app)
+  app.run("window.scrollTo = () => { __scrolled = true }")
+  app.run('__scrolled = false')
+
+  await app.call('save')
+
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(addView.classList.contains('hidden'), true)
+  assert.equal(receiptsView.classList.contains('hidden'), false)
+  assert.equal(app.run('__scrolled'), true)
+})
+
+test('normal Add Receipt save behavior and validation message are unchanged outside review mode', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  await app.call('loadSettings')
+  app.call('resetReceiptForm')
+  app.element('supplier').value = ''
+  app.element('date').value = ''
+  app.element('amount').value = ''
+
+  const result = await app.call('save')
+
+  assert.equal(result, undefined)
+  assert.equal(app.element('saveMsg').textContent, 'Supplier, date and total are required.')
+  assert.equal(app.element('supplier').classList.contains('field-error'), false, 'field error styling is review-mode only')
+
+  fillForm(app)
+  const saved = await app.call('save', { addAnother: true })
+  assert.equal(saved.addAnother, true)
+  assert.equal(db.calls.inserts.length, 1)
 })
