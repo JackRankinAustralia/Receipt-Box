@@ -21,7 +21,7 @@ function backend(initialRows = []) {
     categories: [{ id: 'category-other', user_id: 'test-user', name: 'Other', is_default: true, is_archived: false }, { id: 'category-equipment', user_id: 'test-user', name: 'Equipment', is_default: false, is_archived: false }, { id: 'category-travel', user_id: 'test-user', name: 'Travel', is_default: false, is_archived: false }, { id: 'category-office', user_id: 'test-user', name: 'Office Supplies', is_default: false, is_archived: false }],
     projects: [{ id: 'project-expo', user_id: 'test-user', name: 'Expo', is_default: false, is_archived: false }, { id: 'project-showground', user_id: 'test-user', name: 'Showground', is_default: false, is_archived: false }, { id: 'project-updated', user_id: 'test-user', name: 'Updated project', is_default: false, is_archived: false }]
   }
-  const calls = { inserts: [], updates: [], deletes: [], uploads: [], removes: [] }
+  const calls = { inserts: [], updates: [], deletes: [], uploads: [], removes: [], signedUrls: [] }
   const api = {
     calls,
     rows,
@@ -55,7 +55,7 @@ function backend(initialRows = []) {
     storage: { from() { return {
       async upload(path, file) { calls.uploads.push({ path, file }); if (api.uploadShouldFail) return { error: Error('Simulated storage upload failure') }; return { error: null } },
       async remove(paths) { calls.removes.push(paths); return { error: null } },
-      async createSignedUrl() { return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
+      async createSignedUrl(path) { calls.signedUrls.push(path); return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
     } } }
   }
   return api
@@ -786,6 +786,254 @@ test('Processing badge shows an animated spinner for active states; Ready to rev
   const html = app.element('needsReviewList').innerHTML
   const spinnerCount = (html.match(/class="statusspinner"/g) || []).length
   assert.equal(spinnerCount, 2, 'only the two active-processing rows (queued, reading) get a spinner')
+})
+
+test('findPossibleDuplicate: identical supplier/date/total on another completed receipt is a duplicate', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 }),
+    receipt({ id: 'b', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match?.id, 'a')
+})
+
+test('findPossibleDuplicate: supplier case differences still match', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'BUNNINGS WAREHOUSE', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match?.id, 'a')
+})
+
+test('findPossibleDuplicate: supplier outer whitespace differences still match', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: '  Bunnings Warehouse  ', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match?.id, 'a')
+})
+
+test('findPossibleDuplicate: different supplier does not match', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Officeworks', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: different date does not match', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-31', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: different total does not match', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 12.34 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: missing supplier on the current receipt never flags', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: '', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: missing date on the current receipt never flags', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: null, total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: missing total on the current receipt never flags', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: null })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: a receipt never matches itself', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'a', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: completed candidate rows are eligible', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match?.id, 'a')
+})
+
+test('findPossibleDuplicate: needs_review candidate rows are eligible', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match?.id, 'a')
+})
+
+test('findPossibleDuplicate: needs_attention candidates are ignored', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'needs_attention', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: queued candidates are ignored', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'queued', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: reading candidates are ignored', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'reading', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: uploading candidates are ignored', () => {
+  const app = loadApp()
+  app.setRows([
+    receipt({ id: 'a', workflow_status: 'uploading', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match, null)
+})
+
+test('findPossibleDuplicate: legacy/missing workflow_status follows existing completed semantics', () => {
+  const app = loadApp()
+  const legacyRow = receipt({ id: 'a', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  delete legacyRow.workflow_status
+  app.setRows([legacyRow])
+  const match = app.call('findPossibleDuplicate', { id: 'b', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  assert.equal(match?.id, 'a')
+})
+
+test('Review warning renders the correct candidate supplier/date/total and links View receipt to the candidate id', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 }),
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  const html = app.element('dupBanner').innerHTML
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), false)
+  assert.match(html, /Possible duplicate/)
+  assert.match(html, /Bunnings Warehouse/)
+  assert.match(html, /\$40\.90/)
+  assert.match(html, /30 Dec 2025/)
+  assert.match(html, /viewFile\('existing-1'\)/)
+})
+
+test('Save & complete remains enabled while a possible-duplicate warning is showing', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 }),
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), false)
+  assert.equal(app.element('saveBtn').disabled, false)
+})
+
+test('Save & review next remains enabled while a possible-duplicate warning is showing', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 }),
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), false)
+  assert.equal(app.element('saveAnotherBtn').disabled, false)
+})
+
+test('Editing Supplier/Date/Total so the match disappears removes the duplicate warning', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 }),
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), false)
+
+  app.element('amount').value = '99.99'
+  app.call('syncDuplicateWarning')
+
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), true)
+})
+
+test('Editing fields to create a new match shows the duplicate warning', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Officeworks', receipt_date: '2025-11-01', total: 12.50 }),
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Bunnings Warehouse', receipt_date: '2025-12-30', total: 40.90 })
+  ])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), true)
+
+  app.element('supplier').value = 'Officeworks'
+  app.element('date').value = '2025-11-01'
+  app.element('amount').value = '12.50'
+  app.call('syncDuplicateWarning')
+
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), false)
+  assert.match(app.element('dupBanner').innerHTML, /Officeworks/)
 })
 
 test('Review opens the existing Add Receipt form without triggering automatic Gemini', async () => {
