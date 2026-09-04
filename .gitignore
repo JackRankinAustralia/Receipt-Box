@@ -1,3 +1,9 @@
 node_modules/
 .env
 .env.local
+www/
+ios/App/Pods/
+ios/App/build/
+ios/App/DerivedData/
+ios/App/*.xcuserstate
+ios/App/*.xcworkspace/xcuserdata/
