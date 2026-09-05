@@ -402,7 +402,17 @@ function reportPeriodLabel(){
 }
 function reportFilename(extension){const b=reportPeriodBounds(),mode=b.mode;let period;if(mode==='fy'||mode==='lastfy'){const y=Number(b.start.slice(0,4));period='FY'+y+'-'+String(y+1).slice(-2)}else if(b.start&&b.end)period=b.start+'-to-'+b.end;else period=mode==='all'?'All-Time':'Report';return'Receipt-Box-'+period+'.'+extension}
 function attachmentFilename(row){return row.original_filename||String(row.file_path||'').split('/').pop()||''}
-function exportReportPDF(){
+function isNativeApp(){return typeof Capacitor!=='undefined'&&Capacitor.isNativePlatform?.()===true}
+let nativeExportPluginCache=null;
+function nativeExportPlugins(){if(nativeExportPluginCache)return nativeExportPluginCache;const plugin=name=>Capacitor?.Plugins?.[name]||Capacitor?.registerPlugin?.(name);return nativeExportPluginCache={Filesystem:plugin('Filesystem'),Share:plugin('Share')}}
+async function shareNativeExport({filename,mimeType,text,base64,title}){
+ const {Filesystem,Share}=nativeExportPlugins();if(!Filesystem?.writeFile||!Filesystem?.deleteFile||!Share?.share)throw Error('Native export plugins are unavailable.');
+ const file={path:filename,data:base64??text,directory:'TEMPORARY'};if(text!==undefined)file.encoding='utf8';let written=false;
+ try{const result=await Filesystem.writeFile(file);written=true;await Share.share({title,files:[result.uri]});return{filename,mimeType,uri:result.uri}}
+ finally{if(written)try{await Filesystem.deleteFile({path:filename,directory:'TEMPORARY'})}catch(_){}}
+}
+function nativeExportFailed(){alert('Receipt Box could not share this export. Please try again.')}
+async function exportReportPDF(){
  if(!entitlementService.require('export_pdf'))return;
  const PDF=window.jspdf?.jsPDF;
  if(!PDF){alert('The PDF exporter could not load. Check your connection and try again.');return}
@@ -414,17 +424,20 @@ function exportReportPDF(){
  const summary=(title,groups)=>{y=drawHeading(title,y);doc.autoTable({startY:y,head:[[title.replace(' summary',''),'Receipts','Total']],body:groups.length?groups.map(g=>[g.name,String(g.count),aud(g.total)]):[['No receipts','0',aud(0)]],margin:{left:14,right:14},theme:'striped',showHead:'everyPage',headStyles:{fillColor:[17,24,39]},styles:{fontSize:8,cellPadding:2.3,overflow:'linebreak'},columnStyles:{0:{cellWidth:125},1:{cellWidth:25,halign:'right'},2:{cellWidth:32,halign:'right'}}});y=doc.lastAutoTable.finalY+9};
  let y=99;summary('Entity summary',entities);summary('Category summary',categories);if(hasProjects)summary('Project summary',projects);
  y=drawHeading('Receipts',y);doc.autoTable({startY:y,head:[['Date','Supplier','Entity','Category','Project','GST','Total']],body:rows.length?rows.map(r=>[safe(r.receipt_date),safe(r.supplier),safe(r.entity_name||'Uncategorised'),safe(r.category_name||'Uncategorised'),safe(r.project_name||'—'),aud(r.gst),aud(r.total)]):[['—','No receipts in this period','—','—','—',aud(0),aud(0)]],margin:{left:14,right:14,bottom:15},theme:'grid',showHead:'everyPage',headStyles:{fillColor:[17,24,39]},styles:{fontSize:6.8,cellPadding:1.8,overflow:'linebreak'},columnStyles:{0:{cellWidth:20},1:{cellWidth:40},2:{cellWidth:26},3:{cellWidth:30},4:{cellWidth:28},5:{cellWidth:17,halign:'right'},6:{cellWidth:21,halign:'right'}},didDrawPage:()=>{const page=doc.internal.getNumberOfPages();doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(107,114,128);doc.text('Generated '+new Intl.DateTimeFormat('en-AU',{dateStyle:'medium'}).format(new Date()),14,289);doc.text('Page '+page,pageWidth-14,289,{align:'right'})}});
- doc.save(reportFilename('pdf'));
+ const filename=reportFilename('pdf');
+ if(isNativeApp()){try{const encoded=String(doc.output('datauristring')).split(',')[1];if(!encoded)throw Error('PDF output was empty.');await shareNativeExport({filename,mimeType:'application/pdf',base64:encoded,title:'Receipt Box PDF report'})}catch(_){nativeExportFailed()}return}
+ doc.save(filename);
 }
 let currentReportCSV='',currentReportFilename='receipt-box-report.csv';
 function buildReportCSV(){
  const rows=[...reportPeriodRows()].sort((a,b)=>String(a.receipt_date||'').localeCompare(String(b.receipt_date||''))),heads=['Date','Supplier','Total','GST','Entity','Category','Project','Notes','Attachment present','Attachment filename'];
  return [heads.map(csvValue).join(','),...rows.map(r=>[r.receipt_date,r.supplier,Number(r.total||0).toFixed(2),Number(r.gst||0).toFixed(2),r.entity_name,r.category_name,r.project_name,r.notes,r.file_path?'Yes':'No',attachmentFilename(r)].map(csvValue).join(','))].join('\n');
 }
-function exportReportCSV(){
+async function exportReportCSV(){
  if(!entitlementService.require('export_csv'))return;
  currentReportCSV=buildReportCSV();
  currentReportFilename=reportFilename('csv');
+ if(isNativeApp()){try{await shareNativeExport({filename:currentReportFilename,mimeType:'text/csv',text:currentReportCSV,title:'Receipt Box CSV report'})}catch(_){nativeExportFailed()}return}
  $('exportPreview').value=currentReportCSV;
  $('exportModal').classList.remove('hidden');
 }
@@ -659,10 +672,11 @@ async function deleteReceipt(id){
  if(r.file_path)await sb.storage.from('receipts').remove([r.file_path]);
  const {error}=await sb.from('receipts').delete().eq('id',id);if(error){alert(error.message);return}closeReceiptDetail();await load();return true;
 }
-function exportCSV(){
+async function exportCSV(){
  if(!entitlementService.require('export_csv'))return;
  const rows=filteredRows(),heads=['Date','Supplier','Total','GST','Category','Entity','Project'];
  const csv=[heads.map(csvValue).join(','),...rows.map(r=>[r.receipt_date,r.supplier,r.total,r.gst,r.category_name,r.entity_name,r.project_name].map(csvValue).join(','))].join('\n');
+ if(isNativeApp()){try{await shareNativeExport({filename:'receipts_export.csv',mimeType:'text/csv',text:csv,title:'Receipt Box receipts export'})}catch(_){nativeExportFailed()}return}
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'})),a=document.createElement('a');a.href=url;a.download='receipts_export.csv';a.click();URL.revokeObjectURL(url);
 }
 async function handleReceiptFileInput(input,otherInput){const file=input.files[0];if(!file)return;otherInput.value='';try{await handleReceiptSelection(file);syncReadButtonState()}catch(error){receiptOCRReady=false;setScannerLoading(false);syncReadButtonState()}}

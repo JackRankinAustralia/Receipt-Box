@@ -53,15 +53,17 @@ function loadApp() {
   }
   elements.mainArea = makeElement()
   elements.mainArea.children = [makeElement(), makeElement(), makeElement(), makeElement()]
+  const createdElements = []
   const document = {
     getElementById(id) {
       if (!elements[id]) elements[id] = makeElement()
       return elements[id]
     },
-    createElement() { return makeElement() },
+    createElement(tagName) { const element = makeElement(); element.tagName = String(tagName || '').toUpperCase(); createdElements.push(element); return element },
     querySelectorAll() { return [] }
   }
   let confirmResult = true
+  const alerts = []
   const revokedObjectUrls = []
   let timeoutCounter = 0
   const scheduledTimeouts = new Map()
@@ -91,7 +93,7 @@ function loadApp() {
     confirm() { return confirmResult },
     prompt() { return null },
     location: { origin: 'https://example.test', pathname: '/' },
-    alert() {}
+    alert(message) { alerts.push(message) }
   })
   vm.runInContext(appScript.slice(0, eventBindings), context, { filename: 'index.html' })
   context.__testEntitlement = { plan: 'pro', ocr: { used: 0, limit: null, allowed: true }, capabilities: { run_ocr: true, create_entity: true, create_project: true, custom_categories: true, advanced_reports: true, export_csv: true, export_pdf: true } }
@@ -133,6 +135,15 @@ function loadApp() {
       return vm.runInContext('({ user, allRows, receiptRows, settingsData, previewUrl, authGeneration, entitlementState, ocrScanSessionId, receiptMode, editingExistingReceipt, saveInProgress, receiptSelectionGeneration, ocrReading, reviewMode })', context)
     },
     revokedObjectUrls,
+    createdElements,
+    alerts,
+    setNativePlugins(plugins, { registerOnly = false } = {}) {
+      context.__testNativePlugins = plugins
+      context.__testRegisterOnly = registerOnly
+      vm.runInContext(`Capacitor = __testRegisterOnly
+        ? { isNativePlatform: () => true, Plugins: {}, registerPlugin(name) { const plugin = __testNativePlugins[name]; this.Plugins[name] = plugin; return plugin } }
+        : { isNativePlatform: () => true, Plugins: __testNativePlugins }`, context)
+    },
     setBackend(backend, testUser = { id: 'test-user' }) {
       context.__testBackend = backend
       context.__testUser = testUser
