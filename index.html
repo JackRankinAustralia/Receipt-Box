@@ -116,7 +116,7 @@ function setSaveControls(saving){for(const id of ['saveBtn','saveAnotherBtn']){$
 function isCurrentReceiptSelection(generation){return generation===receiptSelectionGeneration}
 let mainTabViews=[],mainTabButtons=[];
 function setActiveTab(tab,views,buttons,viewTab){const index={add:0,receipts:1,reports:2}[tab]??0;const viewIndex={add:0,receipts:1,reports:2}[viewTab||tab]??index;views.forEach((view,i)=>view.classList.toggle('hidden',i!==viewIndex));buttons.forEach((button,i)=>{const active=i===index;button.classList.toggle('active',active);if(button.setAttribute)button.setAttribute('aria-selected',active?'true':'false')})}
-function activateMainTab(tab,viewTab){setActiveTab(tab,mainTabViews,mainTabButtons,viewTab)}
+function activateMainTab(tab,viewTab){if(tab==='add'&&reviewMode){closeReceiptDetail();$('detailTitle').textContent='Receipt';$('detailBody').innerHTML='';resetReceiptForm({preserveTab:true});window.scrollTo({top:0,behavior:'smooth'})}setActiveTab(tab,mainTabViews,mainTabButtons,viewTab)}
 function initTabs(){const main=$('mainArea');if(!main||!main.children||main.children.length<4)return;mainTabViews=[main.children[1],main.children[3],main.children[2]];const labels=['Add Receipt','Receipts','Reports'];mainTabButtons=labels.map((label,i)=>{const button=document.createElement('button');button.type='button';button.className='tabbtn'+(i===0?' active':'');button.textContent=label;button.dataset.tab=['add','receipts','reports'][i];button.setAttribute('aria-selected',i===0?'true':'false');button.onclick=()=>activateMainTab(button.dataset.tab);return button});const tabbar=document.createElement('nav');tabbar.className='tabbar';tabbar.setAttribute('aria-label','Receipt Box sections');mainTabButtons.forEach(button=>tabbar.appendChild(button));if(main.prepend)main.prepend(tabbar);else main.insertBefore(tabbar,main.firstChild);activateMainTab('add')}
 function setScannerLoading(loading){const button=$('readBtn');button.innerHTML=loading?'Reading your receipt… <span class="readspinner" aria-hidden="true"></span>':'Read again';if(button.setAttribute)button.setAttribute('aria-busy',loading?'true':'false')}
 function highlightAutoFilledFields(fields){for(const id of fields){const field=$(id);if(!field)continue;field.classList.remove('autofilled');void field.offsetWidth;field.classList.add('autofilled');setTimeout(()=>field.classList.remove('autofilled'),2000)}}
@@ -498,6 +498,7 @@ function setReviewMode(review,status){
  reviewMode=review;
  $('captureImportBlock').classList.toggle('hidden',review);
  $('receiptImageBox').classList.toggle('review-preview-only',review);
+ $('rotateBtn').classList.toggle('hidden',review);
  if(!review){$('addReceiptHeading').textContent='Add receipt';$('reviewBanner').classList.add('hidden');$('reviewBanner').innerHTML='';clearFieldValidationErrors();hideDuplicateWarning();$('deleteReviewBtn').classList.add('hidden');return}
  $('addReceiptHeading').textContent='Review receipt';$('saveBtn').textContent='Save & complete';$('saveAnotherBtn').textContent='Save & review next';
  const attention=status==='needs_attention';

@@ -1846,6 +1846,7 @@ test('new receipt mode keeps the capture and import block visible', () => {
   app.call('setReviewMode', false)
   assert.equal(app.element('captureImportBlock').classList.contains('hidden'), false)
   assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), false)
+  assert.equal(app.element('rotateBtn').classList.contains('hidden'), false)
 })
 
 test('review mode hides capture controls while retaining the persisted receipt preview', async () => {
@@ -1857,6 +1858,7 @@ test('review mode hides capture controls while retaining the persisted receipt p
 
   assert.equal(app.element('captureImportBlock').classList.contains('hidden'), true)
   assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), true)
+  assert.equal(app.element('rotateBtn').classList.contains('hidden'), true)
   assert.equal(app.element('receiptPreview').src, 'https://example.test/receipt')
   assert.equal(app.element('previewFrame').style.display, 'grid')
 })
@@ -1871,7 +1873,45 @@ test('leaving review restores the new-receipt capture and import block', async (
 
   assert.equal(app.element('captureImportBlock').classList.contains('hidden'), false)
   assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), false)
+  assert.equal(app.element('rotateBtn').classList.contains('hidden'), false)
   assert.equal(app.element('previewFrame').style.display, 'none')
+})
+
+test('tapping Add Receipt from review fully resets UI state without changing the persisted receipt', async () => {
+  const rows = [
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Pearl Energy Wodonga', receipt_date: '2025-11-14', total: 23.25 }),
+    receipt({ id: 'review-image-1', workflow_status: 'needs_review', supplier: 'Pearl Energy Wodonga', receipt_date: '2025-11-14', total: 23.25 })
+  ]
+  const app = loadApp(), db = backend(rows)
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings'); await app.call('reviewReceipt', 'review-image-1')
+  assert.match(app.element('dupBanner').innerHTML, /View matching receipt/)
+  app.element('detailTitle').textContent = 'Matching receipt'
+  app.element('detailBody').innerHTML = '<strong>Matching receipt</strong>'
+  app.element('detailModal').classList.remove('hidden')
+
+  const [tabbar] = app.element('mainArea').children
+  tabbar.children[0].onclick()
+
+  assert.equal(app.state().reviewMode, false)
+  assert.equal(app.state().receiptMode, 'create')
+  assert.equal(app.element('saveBtn').dataset.edit, undefined)
+  assert.equal(app.element('receiptPreview').src, undefined)
+  assert.equal(app.element('previewFrame').style.display, 'none')
+  assert.equal(app.element('fileName').textContent, '')
+  assert.equal(app.element('dupBanner').classList.contains('hidden'), true)
+  assert.equal(app.element('dupBanner').innerHTML, '')
+  assert.equal(app.element('reviewBanner').classList.contains('hidden'), true)
+  assert.equal(app.element('reviewBanner').innerHTML, '')
+  assert.equal(app.element('detailModal').classList.contains('hidden'), true)
+  assert.equal(app.element('detailTitle').textContent, 'Receipt')
+  assert.equal(app.element('detailBody').innerHTML, '')
+  assert.equal(app.element('captureImportBlock').classList.contains('hidden'), false)
+  assert.equal(app.element('rotateBtn').classList.contains('hidden'), false)
+  for (const id of ['supplier', 'amount', 'gst', 'notes', 'cameraFile', 'libraryFile']) assert.equal(app.element(id).value, '')
+  assert.equal(db.rows.length, 2)
+  assert.deepEqual(db.calls.updates, [])
+  assert.deepEqual(db.calls.deletes, [])
+  assert.deepEqual(db.calls.removes, [])
 })
 
 test('Read again / automatic OCR block is hidden by default in the normal new-receipt flow', () => {
