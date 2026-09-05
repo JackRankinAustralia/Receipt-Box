@@ -615,23 +615,21 @@ test('batchAdmissionSummary reports a non-technical success/failure count', () =
   assert.equal(app.call('batchAdmissionSummary', [{ ok: true }]), "1 receipt safely added. They're waiting in Needs Review.")
 })
 
-test('handleLibraryFileSelection keeps the existing single-image OCR flow unchanged', async () => {
+test('handleLibraryFileSelection admits a single new library image durably and does not use foreground OCR', async () => {
   const app = loadApp(), db = backend([])
-  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
-  app.setBackend(db)
   let reads = 0
-  app.setFunction('prepareReceiptFile', async file => file)
-  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setBackend(db)
   app.setFunction('scanReceiptWithGemini', async () => { reads++; return { supplier: 'APCO Wangaratta', date: '2025-10-23', total: 25.23, gst: 2.29 } })
   const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
   app.element('libraryFile').files = [image]
 
   await app.call('handleLibraryFileSelection', [image], app.element('libraryFile'))
-  await waitFor(() => reads === 1)
-  await waitFor(() => app.element('supplier').value === 'APCO Wangaratta')
 
-  assert.equal(db.calls.inserts.length, 0, 'single-image selection does not go through durable admission')
-  assert.equal(db.calls.uploads.length, 0)
+  assert.equal(db.calls.inserts.length, 1, 'single new library image is durably admitted like camera capture')
+  assert.equal(db.calls.uploads.length, 1)
+  assert.equal(reads, 0, 'foreground Gemini OCR must not be used for a single new library image')
+  assert.equal(app.element('supplier').value, '', 'the Add Receipt form is cleared, not populated with foreground OCR fields')
+  assert.equal(app.element('admitBanner').classList.contains('hidden'), false, 'the Receipt added confirmation is shown')
 })
 
 test('handleLibraryFileSelection keeps the existing single-PDF manual-entry flow unchanged', async () => {
@@ -1807,4 +1805,95 @@ test('existing Review workflow remains unchanged by rapid camera capture', async
 
   assert.equal(app.element('addReceiptHeading').textContent, 'Review receipt')
   assert.equal(app.element('rapidCaptureCard').classList.contains('hidden'), true)
+})
+
+test('a failed single-library-image admission does not show the Receipt added confirmation', async () => {
+  const app = loadApp(), db = backend([])
+  db.storage.from = () => ({
+    async upload() { return { error: Error('Simulated storage upload failure') } },
+    async remove(paths) { db.calls.removes.push(paths); return { error: null } },
+    async createSignedUrl() { return { data: { signedUrl: 'https://example.test/receipt' }, error: null } }
+  })
+  app.setBackend(db)
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+
+  await app.call('handleLibraryFileSelection', [image], app.element('libraryFile'))
+
+  assert.equal(app.element('admitBanner').classList.contains('hidden'), true)
+  assert.match(app.element('batchStatus').innerHTML, /could not be added safely/)
+})
+
+test('Choose photo or PDF is rendered as a real secondary button beneath Take photo', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /Take photo<input id="cameraFile"/)
+  assert.match(html, /<label class="btn secondary"[^>]*>Choose photo or PDF<input id="libraryFile"/)
+})
+
+test('Read again / automatic OCR block is hidden by default in the normal new-receipt flow', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /<div id="ocrRetryBox" class="ocrbox hidden">/)
+})
+
+test('duplicate banner button reads View matching receipt', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.ok(html.includes('View matching receipt'), 'duplicate banner should say View matching receipt')
+  assert.ok(html.includes('esc(candidate.id)'), 'the button still targets the candidate id')
+})
+
+test('Delete receipt button is hidden outside review mode and for brand-new unsaved entries', async () => {
+  const app = loadApp(), db = backend([])
+  app.setBackend(db)
+  await app.call('resetReceiptForm')
+
+  assert.equal(app.element('deleteReviewBtn').classList.contains('hidden'), true)
+})
+
+test('Delete receipt button appears only when reviewing an existing persisted receipt', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  assert.equal(app.element('deleteReviewBtn').classList.contains('hidden'), false)
+})
+
+test('deleting a receipt from review requires confirmation, uses the existing deletion path, and returns to Receipts', async () => {
+  const app = loadApp(), db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review' })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'needs-review-1')
+
+  let confirmed = false
+  app.setConfirm(false)
+  await app.call('deleteReceiptFromReview')
+  assert.equal(db.calls.deletes.length, 0, 'declining the confirmation does not delete the receipt')
+
+  app.setConfirm(true)
+  await app.call('deleteReceiptFromReview')
+
+  assert.equal(db.calls.deletes.length, 1)
+  assert.equal(db.calls.deletes[0], 'needs-review-1')
+  assert.equal(JSON.stringify(db.calls.removes), JSON.stringify([['test-user/receipt-1/image.jpg']]))
+})
+
+test('deleting a possible-duplicate candidate does not auto-delete the matching receipt', async () => {
+  const rows = [
+    receipt({ id: 'a', supplier: 'Bunnings', receipt_date: '2026-08-10', total: 40.90, workflow_status: 'needs_review' }),
+    receipt({ id: 'b', supplier: 'Bunnings', receipt_date: '2026-08-10', total: 40.90, workflow_status: 'completed' })
+  ]
+  const app = loadApp(), db = backend(rows)
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('reviewReceipt', 'a')
+  app.setConfirm(true)
+
+  await app.call('deleteReceiptFromReview')
+
+  assert.equal(db.calls.deletes.length, 1)
+  assert.equal(db.calls.deletes[0], 'a', 'only the receipt being reviewed is deleted, not the matching receipt')
 })
