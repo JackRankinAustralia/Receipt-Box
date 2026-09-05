@@ -47,6 +47,7 @@ function loadApp() {
       prepend(child) { this.children.unshift(child); return child },
       removeAttribute(name) { delete this[name] },
       setAttribute(name, value) { this[name] = value },
+      scrollIntoView(options) { this.scrollIntoViewCalls = (this.scrollIntoViewCalls || []); this.scrollIntoViewCalls.push(options) },
       click() { this.clickCount = (this.clickCount || 0) + 1 }
     }
   }

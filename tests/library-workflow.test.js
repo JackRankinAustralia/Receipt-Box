@@ -630,6 +630,11 @@ test('handleLibraryFileSelection admits a single new library image durably and d
   assert.equal(reads, 0, 'foreground Gemini OCR must not be used for a single new library image')
   assert.equal(app.element('supplier').value, '', 'the Add Receipt form is cleared, not populated with foreground OCR fields')
   assert.equal(app.element('admitBanner').classList.contains('hidden'), false, 'the Receipt added confirmation is shown')
+  assert.equal(app.element('admitBanner').scrollIntoViewCalls.length, 1, 'the single-library confirmation is brought into view once')
+  assert.equal(
+    JSON.stringify(app.element('admitBanner').scrollIntoViewCalls[0]),
+    JSON.stringify({ behavior: 'smooth', block: 'center' })
+  )
 })
 
 test('handleLibraryFileSelection keeps the existing single-PDF manual-entry flow unchanged', async () => {
@@ -958,7 +963,7 @@ test('Review warning renders the correct candidate supplier/date/total and links
   assert.match(html, /Bunnings Warehouse/)
   assert.match(html, /\$40\.90/)
   assert.match(html, /30 Dec 2025/)
-  assert.match(html, /viewFile\('existing-1'\)/)
+  assert.match(html, /viewMatchingReceipt\('existing-1'\)/)
 })
 
 test('Save & complete remains enabled while a possible-duplicate warning is showing', async () => {
@@ -1010,6 +1015,7 @@ test('Editing Supplier/Date/Total so the match disappears removes the duplicate 
   app.call('syncDuplicateWarning')
 
   assert.equal(app.element('dupBanner').classList.contains('hidden'), true)
+  assert.doesNotMatch(app.element('dupBanner').innerHTML, /Delete this receipt/, 'the contextual delete action exists only while a duplicate warning is present')
 })
 
 test('Editing fields to create a new match shows the duplicate warning', async () => {
@@ -1649,6 +1655,7 @@ test('camera capture durably admits the first receipt without calling browser-si
   assert.equal(db.calls.inserts.length, 1)
   assert.equal(db.rows[0].workflow_status, 'queued')
   assert.equal(geminiCalled, false, 'rapid camera admission never calls browser Gemini')
+  assert.equal(app.element('admitBanner').scrollIntoViewCalls, undefined, 'rapid camera capture never triggers the library confirmation scroll')
 })
 
 test('after successful admission the post-capture choice appears with count 1', async () => {
@@ -1821,6 +1828,7 @@ test('a failed single-library-image admission does not show the Receipt added co
   await app.call('handleLibraryFileSelection', [image], app.element('libraryFile'))
 
   assert.equal(app.element('admitBanner').classList.contains('hidden'), true)
+  assert.equal(app.element('admitBanner').scrollIntoViewCalls, undefined, 'failed admission never scrolls to a success message')
   assert.match(app.element('batchStatus').innerHTML, /could not be added safely/)
 })
 
@@ -1828,6 +1836,7 @@ test('Choose photo or PDF is rendered as a real secondary button beneath Take ph
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
   assert.match(html, /Take photo<input id="cameraFile"/)
   assert.match(html, /<label class="btn secondary"[^>]*>Choose photo or PDF<input id="libraryFile"/)
+  assert.match(html, /\.filebox>\.btn\.secondary\{[^}]*width:100%[^}]*min-height:48px[^}]*border:1px solid[^}]*background:#f5f9fc/)
 })
 
 test('Read again / automatic OCR block is hidden by default in the normal new-receipt flow', () => {
@@ -1839,6 +1848,41 @@ test('duplicate banner button reads View matching receipt', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
   assert.ok(html.includes('View matching receipt'), 'duplicate banner should say View matching receipt')
   assert.ok(html.includes('esc(candidate.id)'), 'the button still targets the candidate id')
+})
+
+test('duplicate warning offers current-receipt deletion through the existing confirmed review path only', async () => {
+  const app = loadApp(), db = backend([
+    receipt({ id: 'existing-1', workflow_status: 'completed', supplier: 'Pearl Energy Wodonga', receipt_date: '2025-11-14', total: 23.25 }),
+    receipt({ id: 'needs-review-1', workflow_status: 'needs_review', supplier: 'Pearl Energy Wodonga', receipt_date: '2025-11-14', total: 23.25 })
+  ])
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings'); await app.call('reviewReceipt', 'needs-review-1')
+  const html = app.element('dupBanner').innerHTML
+  assert.match(html, /viewMatchingReceipt\('existing-1'\)/)
+  assert.match(html, /deleteReceiptFromReview\(\)/)
+  assert.match(html, />Delete this receipt</)
+  assert.doesNotMatch(html, /deleteReceipt\('existing-1'\)/, 'the matching receipt is never a delete target')
+
+  app.setConfirm(true)
+  await app.call('deleteReceiptFromReview')
+  assert.deepEqual(db.calls.deletes, ['needs-review-1'])
+})
+
+test('matching receipt view adds context while normal receipt viewing remains unchanged', async () => {
+  const row = receipt({ id: 'existing-1', supplier: 'Pearl Energy Wodonga', receipt_date: '2025-11-14', total: 23.25 })
+  const app = loadApp(), db = backend([row])
+  app.setBackend(db); app.setRows(db.rows)
+
+  await app.call('viewMatchingReceipt', 'existing-1')
+  assert.equal(app.element('detailTitle').textContent, 'Matching receipt')
+  assert.match(app.element('detailBody').innerHTML, /Matching receipt/)
+  assert.match(app.element('detailBody').innerHTML, /Pearl Energy Wodonga · \$23\.25 · 14 Nov 2025/)
+  assert.match(app.element('detailBody').innerHTML, /class="matchingpreview"/)
+
+  app.element('detailTitle').textContent = 'Receipt'
+  app.element('detailBody').innerHTML = ''
+  await app.call('viewFile', 'existing-1')
+  assert.equal(app.element('detailTitle').textContent, 'Receipt')
+  assert.equal(app.element('detailBody').innerHTML, '', 'ordinary attachment viewing does not add matching context')
 })
 
 test('Delete receipt button is hidden outside review mode and for brand-new unsaved entries', async () => {
