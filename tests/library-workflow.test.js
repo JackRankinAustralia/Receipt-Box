@@ -1836,7 +1836,42 @@ test('Choose photo or PDF is rendered as a real secondary button beneath Take ph
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
   assert.match(html, /Take photo<input id="cameraFile"/)
   assert.match(html, /<label class="btn secondary"[^>]*>Choose photo or PDF<input id="libraryFile"/)
-  assert.match(html, /\.filebox>\.btn\.secondary\{[^}]*width:100%[^}]*min-height:48px[^}]*border:1px solid[^}]*background:#f5f9fc/)
+  assert.match(html, /\.filebox>\.captureimport>\.btn\.secondary\{[^}]*width:100%[^}]*min-height:48px[^}]*border:1px solid[^}]*background:#f5f9fc/)
+})
+
+test('new receipt mode keeps the capture and import block visible', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(html, /<div id="captureImportBlock" class="captureimport">/)
+  const app = loadApp()
+  app.call('setReviewMode', false)
+  assert.equal(app.element('captureImportBlock').classList.contains('hidden'), false)
+  assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), false)
+})
+
+test('review mode hides capture controls while retaining the persisted receipt preview', async () => {
+  const row = receipt({ id: 'review-image-1', workflow_status: 'needs_review' })
+  const app = loadApp(), db = backend([row])
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings')
+
+  await app.call('reviewReceipt', 'review-image-1')
+
+  assert.equal(app.element('captureImportBlock').classList.contains('hidden'), true)
+  assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), true)
+  assert.equal(app.element('receiptPreview').src, 'https://example.test/receipt')
+  assert.equal(app.element('previewFrame').style.display, 'grid')
+})
+
+test('leaving review restores the new-receipt capture and import block', async () => {
+  const row = receipt({ id: 'review-image-1', workflow_status: 'needs_review' })
+  const app = loadApp(), db = backend([row])
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings')
+  await app.call('reviewReceipt', 'review-image-1')
+
+  app.call('resetReceiptForm')
+
+  assert.equal(app.element('captureImportBlock').classList.contains('hidden'), false)
+  assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), false)
+  assert.equal(app.element('previewFrame').style.display, 'none')
 })
 
 test('Read again / automatic OCR block is hidden by default in the normal new-receipt flow', () => {
