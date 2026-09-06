@@ -403,8 +403,9 @@ function reportPeriodLabel(){
 function reportFilename(extension){const b=reportPeriodBounds(),mode=b.mode;let period;if(mode==='fy'||mode==='lastfy'){const y=Number(b.start.slice(0,4));period='FY'+y+'-'+String(y+1).slice(-2)}else if(b.start&&b.end)period=b.start+'-to-'+b.end;else period=mode==='all'?'All-Time':'Report';return'Receipt-Box-'+period+'.'+extension}
 function attachmentFilename(row){return row.original_filename||String(row.file_path||'').split('/').pop()||''}
 function isNativeApp(){return typeof Capacitor!=='undefined'&&Capacitor.isNativePlatform?.()===true}
+function capacitorPlugin(name){return Capacitor?.Plugins?.[name]||Capacitor?.registerPlugin?.(name)}
 let nativeExportPluginCache=null;
-function nativeExportPlugins(){if(nativeExportPluginCache)return nativeExportPluginCache;const plugin=name=>Capacitor?.Plugins?.[name]||Capacitor?.registerPlugin?.(name);return nativeExportPluginCache={Filesystem:plugin('Filesystem'),Share:plugin('Share')}}
+function nativeExportPlugins(){if(nativeExportPluginCache)return nativeExportPluginCache;return nativeExportPluginCache={Filesystem:capacitorPlugin('Filesystem'),Share:capacitorPlugin('Share')}}
 async function shareNativeExport({filename,mimeType,text,base64,title}){
  const {Filesystem,Share}=nativeExportPlugins();if(!Filesystem?.writeFile||!Filesystem?.deleteFile||!Share?.share)throw Error('Native export plugins are unavailable.');
  const file={path:filename,data:base64??text,directory:'TEMPORARY'};if(text!==undefined)file.encoding='utf8';let written=false;
@@ -476,17 +477,24 @@ function renderRows(){
  const sort=$('receiptSort')?.value||'newest',groups=groupReceiptsByMonth(rows,sort);
  $('receipts').innerHTML=groups.map(g=>'<div class="montharchivegroup"><h4 class="montharchiveheading">'+esc(g.label)+'</h4>'+g.rows.map(receiptRowHtml).join('')+'</div>').join('');
 }
+function isImageAttachment(r){return String(r.mime_type||'').startsWith('image/')||/\.(?:jpe?g|png|gif|webp|heic|heif)$/i.test(attachmentFilename(r))}
+let nativeAttachmentBrowserCache=null;
+async function openNativeAttachment(url){const Browser=nativeAttachmentBrowserCache||capacitorPlugin('Browser');nativeAttachmentBrowserCache=Browser;if(!Browser?.open)throw Error('Native browser plugin is unavailable.');await Browser.open({url,presentationStyle:'fullscreen'})}
+function showNativeAttachmentImage(r,url){$('detailTitle').textContent=r.supplier||'Receipt';$('detailBody').innerHTML='<img class="matchingpreview" alt="Receipt attachment" src="'+esc(url)+'">';$('detailModal').classList.remove('hidden')}
+function attachmentOpenFailed(){alert('Receipt Box could not open this attachment. Please try again.')}
 async function viewFile(id,options={}){
  const r=typeof id==='number'?receiptRows[id]:allRows.find(x=>x.id===id); if(!r?.file_path)return;
  const {data,error}=await sb.storage.from('receipts').createSignedUrl(r.file_path,300);
- if(error){alert(error.message);return}
+ if(error||!data?.signedUrl){attachmentOpenFailed();return}
  if(options.matching){
+  if(isNativeApp()&&!isImageAttachment(r)){try{await openNativeAttachment(data.signedUrl)}catch(_){attachmentOpenFailed()}return}
   const summary=[r.supplier,money(r.total),formatReceiptDateDisplay(r.receipt_date)].filter(Boolean).map(esc).join(' · '),url=esc(data.signedUrl);
   $('detailTitle').textContent='Matching receipt';
   $('detailBody').innerHTML='<div class="matchingcontext"><strong>Matching receipt</strong>'+(summary?'<div style="margin-top:3px">'+summary+'</div>':'')+'</div>'+(String(r.mime_type||'').includes('pdf')?'<iframe class="matchingpreview" title="Matching receipt PDF" src="'+url+'"></iframe>':'<img class="matchingpreview" alt="Matching receipt" src="'+url+'">');
   $('detailModal').classList.remove('hidden');
   return;
  }
+ if(isNativeApp()){if(isImageAttachment(r)){showNativeAttachmentImage(r,data.signedUrl);return}try{await openNativeAttachment(data.signedUrl)}catch(_){attachmentOpenFailed()}return}
  window.open(data.signedUrl,'_blank');
 }
 function viewMatchingReceipt(id){return viewFile(id,{matching:true})}
