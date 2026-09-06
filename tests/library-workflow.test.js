@@ -231,6 +231,47 @@ test('editing from the Receipt Library keeps Receipts active while showing the s
   assert.equal(app.element('rotateBtn').classList.contains('hidden'), true)
 })
 
+test('successful completed-receipt update resets Receipt Library filters and renders the full default list', async () => {
+  const app = loadApp()
+  const db = backend([
+    receipt({ id: 'piantos', supplier: 'Piantos Receipt', receipt_date: '2026-08-10', entity_name: 'AWTCO', category_name: 'Office Supplies' }),
+    receipt({ id: 'other', supplier: 'Zulu Fuel', receipt_date: '2026-08-15', entity_name: 'Personal', category_name: 'Fuel' })
+  ])
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings')
+  Object.assign(app.element('search'), { value: 'Pian' })
+  Object.assign(app.element('filterEntity'), { value: 'AWTCO' })
+  Object.assign(app.element('filterCategory'), { value: 'Office Supplies' })
+  Object.assign(app.element('filterDateFrom'), { value: '2026-08-01' })
+  Object.assign(app.element('filterDateTo'), { value: '2026-08-31' })
+  Object.assign(app.element('receiptSort'), { value: 'highest' })
+  app.call('renderRows')
+  assert.deepEqual(Array.from(app.call('filteredRows'), row => row.id), ['piantos'])
+
+  await app.call('editReceipt', 'piantos')
+  assert.deepEqual(
+    ['search', 'filterEntity', 'filterCategory', 'filterDateFrom', 'filterDateTo', 'receiptSort'].map(id => app.element(id).value),
+    ['Pian', 'AWTCO', 'Office Supplies', '2026-08-01', '2026-08-31', 'highest'],
+    'opening edit must not prematurely clear the library state'
+  )
+  fillForm(app, { supplier: 'Piantos Receipt Updated' })
+
+  await app.call('save')
+
+  assert.deepEqual(
+    ['search', 'filterEntity', 'filterCategory', 'filterDateFrom', 'filterDateTo', 'receiptSort'].map(id => app.element(id).value),
+    ['', '', '', '', '', 'newest']
+  )
+  assert.deepEqual(Array.from(app.call('filteredRows'), row => row.id), ['piantos', 'other'])
+  assert.match(app.element('receipts').innerHTML, /Piantos Receipt Updated/)
+  assert.match(app.element('receipts').innerHTML, /Zulu Fuel/)
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(tabbar.children[0].classList.contains('active'), false)
+  assert.equal(addView.classList.contains('hidden'), true)
+  assert.equal(receiptsView.classList.contains('hidden'), false)
+  assert.deepEqual(JSON.parse(JSON.stringify(app.scrollCalls.at(-1))), { top: 0, behavior: 'smooth' })
+})
+
 test('editing from the receipt detail view keeps Receipts active', async () => {
   const app = loadApp(), db = backend([receipt()])
   app.setBackend(db)

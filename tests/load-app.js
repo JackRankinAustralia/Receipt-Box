@@ -65,6 +65,7 @@ function loadApp() {
   let confirmResult = true
   const alerts = []
   const openedWindows = []
+  const scrollCalls = []
   const revokedObjectUrls = []
   let timeoutCounter = 0
   const scheduledTimeouts = new Map()
@@ -75,7 +76,7 @@ function loadApp() {
   const context = vm.createContext({
     console,
     document,
-    window: { location: {}, scrollTo() {}, open(...args) { openedWindows.push(args); return {} } },
+    window: { location: {}, scrollTo(options) { scrollCalls.push(options) }, open(...args) { openedWindows.push(args); return {} } },
     Intl,
     Date: FixedDate,
     Map,
@@ -139,6 +140,7 @@ function loadApp() {
     createdElements,
     alerts,
     openedWindows,
+    scrollCalls,
     setNativePlugins(plugins, { registerOnly = false } = {}) {
       context.__testNativePlugins = plugins
       context.__testRegisterOnly = registerOnly
