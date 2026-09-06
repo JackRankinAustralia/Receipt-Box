@@ -199,7 +199,7 @@ test('editing populates the saved fields and updates the existing receipt withou
   assert.match(app.element('saveMsg').innerHTML, /Receipt updated\.<\/strong> You can keep editing, add another, or view it in Receipts\./i)
 })
 
-test('editing from the Receipt Library activates the Add Receipt tab without reading the receipt', async () => {
+test('editing from the Receipt Library keeps Receipts active while showing the shared form', async () => {
   const app = loadApp(), db = backend([receipt()])
   app.setBackend(db)
   app.setRows(db.rows)
@@ -211,8 +211,9 @@ test('editing from the Receipt Library activates the Add Receipt tab without rea
   await app.call('editReceipt', 'receipt-1')
 
   const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
-  assert.equal(tabbar.children[0].classList.contains('active'), true)
-  assert.equal(tabbar.children[0]['aria-selected'], 'true')
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(tabbar.children[1]['aria-selected'], 'true')
+  assert.equal(tabbar.children[0].classList.contains('active'), false)
   assert.equal(addView.classList.contains('hidden'), false)
   assert.equal(receiptsView.classList.contains('hidden'), true)
   assert.equal(app.element('supplier').value, 'Alpha Supplies')
@@ -220,7 +221,7 @@ test('editing from the Receipt Library activates the Add Receipt tab without rea
   assert.equal(reads, 0)
 })
 
-test('editing from the receipt detail view activates the Add Receipt tab', async () => {
+test('editing from the receipt detail view keeps Receipts active', async () => {
   const app = loadApp(), db = backend([receipt()])
   app.setBackend(db)
   app.setRows(db.rows)
@@ -232,10 +233,30 @@ test('editing from the receipt detail view activates the Add Receipt tab', async
   await waitFor(() => app.state().receiptMode === 'edit')
 
   const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
-  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(tabbar.children[0].classList.contains('active'), false)
   assert.equal(addView.classList.contains('hidden'), false)
   assert.equal(receiptsView.classList.contains('hidden'), true)
   assert.equal(app.element('supplier').value, 'Alpha Supplies')
+})
+
+test('tapping Add Receipt while editing a completed receipt starts a fresh receipt without changing storage', async () => {
+  const app = loadApp(), db = backend([receipt()])
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings')
+  await app.call('editReceipt', 'receipt-1')
+
+  app.call('activateMainTab', 'add')
+
+  const [tabbar, , addView] = app.element('mainArea').children
+  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(addView.classList.contains('hidden'), false)
+  assert.equal(app.state().receiptMode, 'create')
+  assert.equal(app.element('supplier').value, '')
+  assert.equal(app.element('receiptPreview').src, undefined)
+  assert.equal(app.element('fileName').textContent, '')
+  assert.equal(db.calls.updates.length, 0)
+  assert.equal(db.calls.deletes.length, 0)
+  assert.equal(db.calls.removes.length, 0)
 })
 
 test('a stale stored image preview cannot replace a newer receipt selection', async () => {
