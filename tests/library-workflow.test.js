@@ -196,7 +196,14 @@ test('editing populates the saved fields and updates the existing receipt withou
     { supplier: 'Updated Supplier', receipt_date: '2026-08-18', total: 101.2, gst: 9.2, entity_name: 'Personal', category_name: 'Travel', project_name: 'Updated project', notes: 'Updated notes' }
   )
   assert.equal(db.rows.length, 1)
-  assert.match(app.element('saveMsg').innerHTML, /Receipt updated\.<\/strong> You can keep editing, add another, or view it in Receipts\./i)
+  assert.equal(app.state().receiptMode, 'create')
+  const [tabbar, , addView, , receiptsView] = app.element('mainArea').children
+  assert.equal(tabbar.children[1].classList.contains('active'), true)
+  assert.equal(tabbar.children[0].classList.contains('active'), false)
+  assert.equal(addView.classList.contains('hidden'), true)
+  assert.equal(receiptsView.classList.contains('hidden'), false)
+  assert.match(app.element('saveMsg').innerHTML, /Receipt updated\./i)
+  assert.doesNotMatch(app.element('saveMsg').innerHTML, /view it in Receipts/i)
 })
 
 test('editing from the Receipt Library keeps Receipts active while showing the shared form', async () => {
@@ -219,6 +226,9 @@ test('editing from the Receipt Library keeps Receipts active while showing the s
   assert.equal(app.element('supplier').value, 'Alpha Supplies')
   assert.equal(app.element('receiptPreview').src, 'https://example.test/receipt')
   assert.equal(reads, 0)
+  assert.equal(app.element('captureImportBlock').classList.contains('hidden'), true)
+  assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), true)
+  assert.equal(app.element('rotateBtn').classList.contains('hidden'), true)
 })
 
 test('editing from the receipt detail view keeps Receipts active', async () => {
@@ -257,6 +267,32 @@ test('tapping Add Receipt while editing a completed receipt starts a fresh recei
   assert.equal(db.calls.updates.length, 0)
   assert.equal(db.calls.deletes.length, 0)
   assert.equal(db.calls.removes.length, 0)
+})
+
+test('Update & add another saves the edit then restores a blank Add Receipt state', async () => {
+  const app = loadApp(), db = backend([receipt()])
+  app.setBackend(db); app.setRows(db.rows); await app.call('loadSettings')
+  await app.call('editReceipt', 'receipt-1')
+  fillForm(app, { supplier: 'Updated Supplier', amount: '31.50' })
+
+  await app.call('saveAndAddAnother')
+
+  const [tabbar, , addView] = app.element('mainArea').children
+  assert.equal(db.calls.updates.length, 1)
+  assert.equal(db.calls.updates[0].id, 'receipt-1')
+  assert.equal(db.calls.deletes.length, 0)
+  assert.equal(db.calls.removes.length, 0)
+  assert.equal(db.rows.length, 1)
+  assert.equal(db.rows[0].supplier, 'Updated Supplier')
+  assert.equal(app.state().receiptMode, 'create')
+  assert.equal(tabbar.children[0].classList.contains('active'), true)
+  assert.equal(addView.classList.contains('hidden'), false)
+  assert.equal(app.element('supplier').value, '')
+  assert.equal(app.element('receiptPreview').src, undefined)
+  assert.equal(app.element('captureImportBlock').classList.contains('hidden'), false)
+  assert.equal(app.element('receiptImageBox').classList.contains('review-preview-only'), false)
+  assert.equal(app.element('rotateBtn').classList.contains('hidden'), false)
+  assert.match(app.element('saveMsg').innerHTML, /Receipt updated.*Ready for the next receipt/i)
 })
 
 test('a stale stored image preview cannot replace a newer receipt selection', async () => {
