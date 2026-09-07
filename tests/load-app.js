@@ -66,6 +66,7 @@ function loadApp() {
   const alerts = []
   const openedWindows = []
   const scrollCalls = []
+  const windowLocation = { origin: 'https://example.test', pathname: '/', href: 'https://example.test/', protocol: 'https:', hostname: 'example.test', search: '' }
   const revokedObjectUrls = []
   let timeoutCounter = 0
   const scheduledTimeouts = new Map()
@@ -76,11 +77,12 @@ function loadApp() {
   const context = vm.createContext({
     console,
     document,
-    window: { location: {}, scrollTo(options) { scrollCalls.push(options) }, open(...args) { openedWindows.push(args); return {} } },
+    window: { location: windowLocation, scrollTo(options) { scrollCalls.push(options) }, open(...args) { openedWindows.push(args); return {} } },
     Intl,
     Date: FixedDate,
     Map,
     URL: TestURL,
+    URLSearchParams,
     Blob,
     File: globalThis.File,
     crypto: { randomUUID: (() => { let n = 0; return () => n++ === 0 ? 'new-receipt-id' : `new-receipt-id-${n}` })() },
@@ -94,7 +96,7 @@ function loadApp() {
     },
     confirm() { return confirmResult },
     prompt() { return null },
-    location: { origin: 'https://example.test', pathname: '/' },
+    location: windowLocation,
     alert(message) { alerts.push(message) }
   })
   vm.runInContext(appScript.slice(0, eventBindings), context, { filename: 'index.html' })
@@ -141,6 +143,9 @@ function loadApp() {
     alerts,
     openedWindows,
     scrollCalls,
+    setWindowLocation(values) {
+      Object.assign(windowLocation, values)
+    },
     setNativePlugins(plugins, { registerOnly = false } = {}) {
       context.__testNativePlugins = plugins
       context.__testRegisterOnly = registerOnly
