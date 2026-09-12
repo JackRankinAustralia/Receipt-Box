@@ -4,6 +4,7 @@ const cors = require('cors')
 const helmet = require('helmet')
 const { rateLimit } = require('express-rate-limit')
 const { join } = require('node:path')
+const { createResendSupportWebhookHandler } = require('./resend-support-webhook')
 
 // Never let an unexpected error take the whole process down; log and keep serving.
 process.on('uncaughtException', error => {
@@ -33,11 +34,11 @@ try {
     if (!origin || allowedOrigins.has(origin)) return callback(null, true)
     return callback(new Error('Origin is not allowed by CORS.'))
   } }))
-  app.use(express.json({ limit: '12mb' }))
-
   var apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false })
   var scanLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
   app.use('/api', apiLimiter)
+  app.post('/api/webhooks/resend', express.raw({ type: 'application/json', limit: '1mb' }), createResendSupportWebhookHandler())
+  app.use(express.json({ limit: '12mb' }))
 } catch (error) {
   console.error('Failed to initialize middleware:', error)
 }
