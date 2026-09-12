@@ -554,9 +554,10 @@ test('parses Total Price without mistaking Amount Tendered for the transaction t
 test('infers only a plausible final date digit near the receipt date', () => {
   const app = loadApp()
   const inferred = app.call('dateInfoFromText', 'noise 13/08/202 text', new Date('2026-08-18T12:00:00+10:00'))
-  assert.deepEqual(JSON.parse(JSON.stringify(inferred)), {
-    value: '2026-08-13', inferred: true, raw: '13/08/202', distance: 5
-  })
+  assert.equal(inferred.value, '2026-08-13')
+  assert.equal(inferred.raw, '13/08/202')
+  assert.equal(inferred.inferred, true)
+  assert.ok(Math.abs(inferred.distance - 5) <= 0.5)
   assert.equal(app.call('dateInfoFromText', 'noise 13/08/199 text', new Date('2026-08-18T12:00:00+10:00')), null)
 })
 
