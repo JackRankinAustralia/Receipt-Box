@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Receipt Box</string>
+	<string>ReceiptGo</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,6 +25,7 @@
 			<string>au.com.receiptbox.app</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>receiptgo</string>
 				<string>receiptbox</string>
 			</array>
 		</dict>
@@ -36,9 +37,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Receipt Box uses your camera to photograph receipts.</string>
+	<string>ReceiptGo uses your camera to photograph receipts.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Receipt Box lets you choose receipt images from your photo library.</string>
+	<string>ReceiptGo lets you choose receipt images from your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

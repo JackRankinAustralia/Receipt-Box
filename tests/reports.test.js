@@ -125,7 +125,7 @@ test('builds CSV report data for the selected period with escaped text', () => {
   assert.match(csv, /"Smith ""Office"""/)
   assert.match(csv, /"Paper, pens"/)
   assert.match(csv, /"Yes","paper.pdf"/)
-  assert.equal(app.call('reportFilename', 'csv'), 'Receipt-Box-All-Time.csv')
+  assert.equal(app.call('reportFilename', 'csv'), 'ReceiptGo-All-Time.csv')
 })
 
 test('neutralises spreadsheet formulas in every CSV value', () => {
@@ -181,7 +181,7 @@ test('passes selected-period metrics, summaries, projects, and receipts to the P
   app.setPDFConstructor(FakePDF)
   app.call('exportReportPDF')
 
-  assert.equal(state.filename, 'Receipt-Box-2026-08-01-to-2026-08-31.pdf')
+  assert.equal(state.filename, 'ReceiptGo-2026-08-01-to-2026-08-31.pdf')
   assert.ok(state.texts.includes('$330.00'))
   assert.ok(state.texts.includes('$30.00'))
   assert.ok(state.texts.includes('2'))
@@ -203,9 +203,9 @@ test('passes selected-period metrics, summaries, projects, and receipts to the P
 test('uses clear financial-year and custom-range export filenames', () => {
   const app = loadApp()
   app.setPeriod('fy')
-  assert.equal(app.call('reportFilename', 'csv'), 'Receipt-Box-FY2026-27.csv')
+  assert.equal(app.call('reportFilename', 'csv'), 'ReceiptGo-FY2026-27.csv')
   app.setPeriod('custom')
   app.element('reportDateFrom').value = '2026-08-01'
   app.element('reportDateTo').value = '2026-08-31'
-  assert.equal(app.call('reportFilename', 'pdf'), 'Receipt-Box-2026-08-01-to-2026-08-31.pdf')
+  assert.equal(app.call('reportFilename', 'pdf'), 'ReceiptGo-2026-08-01-to-2026-08-31.pdf')
 })

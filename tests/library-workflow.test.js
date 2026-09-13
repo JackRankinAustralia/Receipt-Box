@@ -138,7 +138,7 @@ test('Save & add another saves once then fully resets transient receipt state', 
   assert.equal(app.element('previewFrame').style.display, 'none')
   assert.equal(app.element('receiptPreview').style.transform, '')
   assert.equal(app.element('ocrDiagnosticsText').textContent, '')
-  assert.match(app.element('ocrStatus').textContent, /Receipt Box reads new receipt photos automatically\. Use Read again if you want to scan this image again\./)
+  assert.match(app.element('ocrStatus').textContent, /ReceiptGo reads new receipt photos automatically\. Use Read again if you want to scan this image again\./)
   assert.match(app.element('saveMsg').innerHTML, /Ready for the next receipt/i)
   assert.equal(db.rows.length, 1)
 })

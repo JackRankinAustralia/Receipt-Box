@@ -1,6 +1,6 @@
 {
   "appId": "au.com.receiptbox.app",
-  "appName": "Receipt Box",
+  "appName": "ReceiptGo",
   "webDir": "www",
   "server": {
     "androidScheme": "https"

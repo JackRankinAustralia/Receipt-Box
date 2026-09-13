@@ -30,19 +30,19 @@ test('web password reset preserves the hosted current-path redirect', async () =
   assert.match(app.element('loginMsg').innerHTML, /Check your email for a password reset link/)
 })
 
-test('native password reset uses the scoped Receipt Box recovery scheme', async () => {
+test('native password reset uses the ReceiptGo recovery scheme', async () => {
   const app = loadApp(), db = authBackend()
   app.setBackend(db, { id: 'test-user', email: 'owner@example.com' })
   app.setNativePlugins({ App: {} })
 
   assert.equal(await app.call('sendPasswordReset'), true)
-  assert.equal(db.calls.resets[0].options.redirectTo, 'receiptbox://reset-password')
+  assert.equal(db.calls.resets[0].options.redirectTo, 'receiptgo://reset-password')
 })
 
 test('native recovery URL establishes its Supabase session and enters reset mode', async () => {
   const app = loadApp(), db = authBackend()
   app.setBackend(db, null)
-  const url = 'receiptbox://reset-password#access_token=private-access&refresh_token=private-refresh&type=recovery'
+  const url = 'receiptgo://reset-password#access_token=private-access&refresh_token=private-refresh&type=recovery'
 
   assert.equal(app.call('isNativeRecoveryUrl', url), true)
   assert.equal(await app.call('handleNativeRecoveryUrl', url), true)
@@ -50,6 +50,16 @@ test('native recovery URL establishes its Supabase session and enters reset mode
   assert.equal(app.element('loginForm').classList.contains('hidden'), true)
   assert.equal(app.element('passwordRecoveryForm').classList.contains('hidden'), false)
   assert.doesNotMatch(app.element('gate').innerHTML + app.element('loginMsg').innerHTML, /private-access|private-refresh/)
+})
+
+test('legacy Receipt Box recovery links remain accepted', async () => {
+  const app = loadApp(), db = authBackend()
+  app.setBackend(db, null)
+  const url = 'receiptbox://reset-password#access_token=legacy-access&refresh_token=legacy-refresh&type=recovery'
+  assert.equal(app.call('isNativeRecoveryUrl', url), true)
+  assert.equal(await app.call('handleNativeRecoveryUrl', url), true)
+  assert.equal(db.calls.sessions.length, 1)
+  assert.equal(app.call('isNativeRecoveryUrl', 'receiptgo://other-path'), false)
 })
 
 test('Supabase PASSWORD_RECOVERY event enters the new-password form', () => {
@@ -78,7 +88,7 @@ test('normal Supabase sign-in and sign-out transitions remain unchanged', async 
 test('Capacitor App handles both cold-launch and running-app recovery links', async () => {
   const app = loadApp(), db = authBackend()
   let listener
-  const coldUrl = 'receiptbox://reset-password#access_token=cold-access&refresh_token=cold-refresh&type=recovery'
+  const coldUrl = 'receiptgo://reset-password#access_token=cold-access&refresh_token=cold-refresh&type=recovery'
   app.setBackend(db, null)
   app.setNativePlugins({ App: {
     async addListener(name, callback) { assert.equal(name, 'appUrlOpen'); listener = callback },

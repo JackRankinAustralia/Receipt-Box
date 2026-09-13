@@ -70,7 +70,7 @@ test('browser PDF export retains the jsPDF save path', async () => {
 
   await app.call('exportReportPDF')
 
-  assert.equal(FakePDF.instance.saved, 'Receipt-Box-All-Time.pdf')
+  assert.equal(FakePDF.instance.saved, 'ReceiptGo-All-Time.pdf')
   assert.equal(FakePDF.instance.outputType, undefined)
 })
 
@@ -103,7 +103,7 @@ test('native report CSV preserves the period filename and CSV file type', async 
 
   await app.call('exportReportCSV')
 
-  assert.equal(native.calls.writes[0].path, 'Receipt-Box-All-Time.csv')
+  assert.equal(native.calls.writes[0].path, 'ReceiptGo-All-Time.csv')
   const result = await app.call('shareNativeExport', { filename: 'mime.csv', mimeType: 'text/csv', text: 'a,b', title: 'CSV' })
   assert.equal(result.mimeType, 'text/csv')
 })
@@ -114,7 +114,7 @@ test('native PDF export writes base64 PDF content with the correct filename and 
 
   await app.call('exportReportPDF')
 
-  assert.equal(native.calls.writes[0].path, 'Receipt-Box-All-Time.pdf')
+  assert.equal(native.calls.writes[0].path, 'ReceiptGo-All-Time.pdf')
   assert.equal(native.calls.writes[0].data, 'JVBERi0xLjQ=')
   assert.equal(native.calls.writes[0].encoding, undefined)
   assert.equal(FakePDF.instance.saved, undefined)
@@ -136,7 +136,7 @@ test('native share failure shows a concise error, cleans up, and leaves the UI u
 
   await app.call('exportReportCSV')
 
-  assert.deepEqual(app.alerts, ['Receipt Box could not share this export. Please try again.'])
+  assert.deepEqual(app.alerts, ['ReceiptGo could not share this export. Please try again.'])
   assert.equal(native.calls.deletes.length, 1)
   assert.equal(app.element('reportCsvBtn').disabled, false)
 })

@@ -40,7 +40,7 @@ test('browser image attachment retains the existing window-open path', async () 
   assert.equal(app.element('detailBody').innerHTML, '')
 })
 
-test('native image attachment stays in Receipt Box and does not open Browser', async () => {
+test('native image attachment stays in ReceiptGo and does not open Browser', async () => {
   const row = receipt(), app = loadApp(), browser = browserPlugin()
   app.setBackend(backend([row])); app.setRows([row]); app.setNativePlugins({ Browser: browser.plugin })
 
@@ -79,7 +79,7 @@ test('native attachment failure is friendly and recoverable without exposing det
 
   await app.call('viewFile', row.id)
 
-  assert.deepEqual(app.alerts, ['Receipt Box could not open this attachment. Please try again.'])
+  assert.deepEqual(app.alerts, ['ReceiptGo could not open this attachment. Please try again.'])
   assert.doesNotMatch(app.alerts.join(' '), /private signed URL detail/)
   assert.equal(app.element('modalViewFile').disabled, false)
 })
