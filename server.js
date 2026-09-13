@@ -129,6 +129,16 @@ async function handleScanReceipt(request, response) {
 }
 app.post(['/api/scan-receipt', '/api/scan'], scanLimiter, handleScanReceipt)
 
+const publicPages = new Map([
+  ['/privacy', 'privacy.html'],
+  ['/terms', 'terms.html'],
+  ['/support', 'support.html'],
+  ['/delete-account', 'delete-account.html']
+])
+for (const [route, filename] of publicPages) {
+  app.get(route, (_request, response) => response.sendFile(join(root, 'public-pages', filename)))
+}
+
 app.use(express.static(root))
 app.use((error, request, response, next) => {
   console.error('Unhandled request error:', error)
@@ -137,8 +147,12 @@ app.use((error, request, response, next) => {
   response.status(error.type === 'entity.too.large' ? 413 : 400).json({ error: { message } })
 })
 
-app.listen(port, () => {
-  console.log(`Receipt Box server listening on http://localhost:${port}`)
-}).on('error', error => {
-  console.error('Failed to start server:', error)
-})
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Receipt Box server listening on http://localhost:${port}`)
+  }).on('error', error => {
+    console.error('Failed to start server:', error)
+  })
+}
+
+module.exports = { app }
