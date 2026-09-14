@@ -138,6 +138,7 @@ test('Capacitor App handles a running-app legacy recovery link', async () => {
 
 test('recovery password validates confirmation and updates through Supabase Auth', async () => {
   const app = loadApp(), db = authBackend()
+  app.run('globalThis.recoveryLogs = []; console = { warn: (...args) => recoveryLogs.push(args) }')
   let resumedUser = null
   app.setBackend(db, null)
   await app.call('handleNativeRecoveryUrl', 'receiptbox://reset-password#access_token=a&refresh_token=b&type=recovery')
@@ -153,6 +154,7 @@ test('recovery password validates confirmation and updates through Supabase Auth
   assert.equal(JSON.stringify(db.calls.updates), JSON.stringify([{ password: 'new-password-123' }]))
   assert.equal(resumedUser.id, 'recovered-user')
   assert.match(app.element('saveMsg').innerHTML, /Password updated/)
+  assert.equal(app.run('recoveryLogs.length'), 0)
 })
 
 test('invalid or expired native recovery links show a friendly recoverable error', async () => {
@@ -180,17 +182,63 @@ test('password update is not attempted if the recovery session disappears', asyn
   assert.match(app.element('loginMsg').innerHTML, /could not be updated/)
 })
 
-test('a rejected password update keeps friendly copy and records only a safe error category', async () => {
+test('a rejected password update logs only safe Supabase scalar details and keeps friendly copy', async () => {
   const app = loadApp(), db = authBackend()
+  app.run('globalThis.recoveryLogs = []; console = { warn: (...args) => recoveryLogs.push(args) }')
   app.setBackend(db, null)
   await app.call('handleNativeRecoveryUrl', 'receiptgo://reset-password#access_token=private-access&refresh_token=private-refresh&type=recovery')
-  db.auth.updateUser = async () => ({ data: null, error: { code: 'unexpected_auth_failure', message: 'private provider detail' } })
+  db.auth.updateUser = async () => ({ data: null, error: {
+    code: 'same_password', status: 422, name: 'AuthApiError',
+    message: 'New password should be different from the old password.',
+    request: { password: 'new-password-123', url: 'receiptgo://reset-password#access_token=private-access' },
+    session: { access_token: 'private-access', refresh_token: 'private-refresh' },
+    toJSON() { throw new Error('The entire error must never be serialized') }
+  } })
   app.element('recoveryPassword').value = 'new-password-123'
   app.element('recoveryPasswordConfirm').value = 'new-password-123'
   assert.equal(await app.call('submitRecoveryPassword'), false)
   assert.equal(app.run('recoveryDiagnostic'), 'update_user_error')
   assert.match(app.element('loginMsg').innerHTML, /could not be updated/)
-  assert.doesNotMatch(app.element('loginMsg').innerHTML, /private provider detail|private-access|private-refresh/)
+  const logs = JSON.parse(app.run('JSON.stringify(recoveryLogs)'))
+  assert.deepEqual(logs, [['ReceiptGo password recovery update_user_error:', {
+    code: 'same_password', status: 422, name: 'AuthApiError',
+    message: 'New password should be different from the old password.'
+  }]])
+  assert.doesNotMatch(JSON.stringify(logs), /private-access|private-refresh|new-password-123|receiptgo:\/\//)
+  assert.doesNotMatch(app.element('loginMsg').innerHTML, /same_password|New password should|private-access|private-refresh/)
+})
+
+test('thrown updateUser errors use the same restricted diagnostic', async () => {
+  const app = loadApp(), db = authBackend()
+  app.run('globalThis.recoveryLogs = []; console = { warn: (...args) => recoveryLogs.push(args) }')
+  app.setBackend(db, null)
+  await app.call('handleNativeRecoveryUrl', 'receiptgo://reset-password#access_token=private-access&refresh_token=private-refresh&type=recovery')
+  db.auth.updateUser = async () => { throw Object.assign(new Error('Password should be at least 12 characters.'), { name: 'AuthApiError', code: 'weak_password', status: 422 }) }
+  app.element('recoveryPassword').value = 'new-password-123'
+  app.element('recoveryPasswordConfirm').value = 'new-password-123'
+  assert.equal(await app.call('submitRecoveryPassword'), false)
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(recoveryLogs)')), [['ReceiptGo password recovery update_user_error:', {
+    code: 'weak_password', status: 422, name: 'AuthApiError', message: 'Password should be at least 12 characters.'
+  }]])
+})
+
+test('diagnostic scalar text redacts URLs, credentials and echoed passwords', () => {
+  const app = loadApp()
+  app.run('globalThis.recoveryLogs = []; console = { warn: (...args) => recoveryLogs.push(args) }')
+  for (const message of [
+    'Rejected new-password-123',
+    'receiptgo://reset-password?code=private-code',
+    'receiptbox://reset-password#access_token=private-access',
+    'https://auth.example.test/?api_key=private-key',
+    'access_token=private-access', 'refresh_token: private-refresh',
+    'auth_code=private-code', 'password=other-secret', 'api_key=private-key',
+    'Bearer private-access', 'eyJhbGciOiJIUzI1NiJ9.payload.signature'
+  ]) {
+    app.call('reportRecoveryUpdateError', { code: 'unexpected_failure', status: 400, name: 'AuthApiError', message }, 'new-password-123')
+  }
+  const logs = JSON.parse(app.run('JSON.stringify(recoveryLogs)'))
+  for (const [, details] of logs) assert.equal(details.message, '[redacted sensitive diagnostic]')
+  assert.doesNotMatch(JSON.stringify(logs), /private-|new-password-123|other-secret|receiptgo:\/\/|receiptbox:\/\/|https:\/\/|eyJ/)
 })
 
 test('code exchange errors never open the recovery form or expose the code', async () => {
