@@ -5,13 +5,16 @@ const path = require('node:path')
 const { loadApp } = require('./load-app')
 
 function authBackend() {
-  const calls = { resets: [], sessions: [], updates: [] }
+  const calls = { resets: [], sessions: [], exchanges: [], updates: [] }
   const recoveredUser = { id: 'recovered-user', email: 'owner@example.com' }
+  let currentSession = null
   return {
     calls,
     auth: {
       async resetPasswordForEmail(email, options) { calls.resets.push({ email, options }); return { error: null } },
-      async setSession(session) { calls.sessions.push(session); return { data: { session: { user: recoveredUser } }, error: null } },
+      async setSession(session) { calls.sessions.push(session); currentSession = { ...session, user: recoveredUser }; return { data: { session: currentSession }, error: null } },
+      async exchangeCodeForSession(code) { calls.exchanges.push(code); currentSession = { user: recoveredUser, access_token: 'exchanged-access', refresh_token: 'exchanged-refresh' }; return { data: { session: currentSession }, error: null } },
+      async getSession() { return { data: { session: currentSession }, error: null } },
       async updateUser(attributes) { calls.updates.push(attributes); return { data: { user: recoveredUser }, error: null } },
       async signInWithPassword() { return { data: { session: { user: recoveredUser } }, error: null } },
       async signOut() { return { error: null } }
@@ -64,10 +67,26 @@ test('legacy Receipt Box recovery links remain accepted', async () => {
 
 test('Supabase PASSWORD_RECOVERY event enters the new-password form', () => {
   const app = loadApp()
-  app.call('handleAuthStateChange', 'PASSWORD_RECOVERY', { user: { id: 'recovered-user' } })
+  app.call('handleAuthStateChange', 'PASSWORD_RECOVERY', { user: { id: 'recovered-user' }, access_token: 'event-access', refresh_token: 'event-refresh' })
   assert.equal(app.element('loginForm').classList.contains('hidden'), true)
   assert.equal(app.element('passwordRecoveryForm').classList.contains('hidden'), false)
   assert.match(app.element('loginMsg').textContent, /Enter and confirm/)
+})
+
+test('a recovery event without a session cannot expose a usable reset form', () => {
+  const app = loadApp()
+  app.call('handleAuthStateChange', 'PASSWORD_RECOVERY', { user: { id: 'recovered-user' } })
+  assert.equal(app.run('passwordRecoveryMode'), false)
+  assert.equal(app.run('recoverySessionReady'), false)
+})
+
+test('native code-style recovery links exchange before exposing the reset form', async () => {
+  const app = loadApp(), db = authBackend()
+  app.setBackend(db, null)
+  assert.equal(await app.call('handleNativeRecoveryUrl', 'receiptgo://reset-password?code=private-code'), true)
+  assert.deepEqual(db.calls.exchanges, ['private-code'])
+  assert.equal(app.run('recoverySessionReady'), true)
+  assert.equal(app.element('passwordRecoveryForm').classList.contains('hidden'), false)
 })
 
 test('normal Supabase sign-in and sign-out transitions remain unchanged', async () => {
@@ -85,7 +104,7 @@ test('normal Supabase sign-in and sign-out transitions remain unchanged', async 
   assert.equal(signedOut, 1)
 })
 
-test('Capacitor App handles both cold-launch and running-app recovery links', async () => {
+test('Capacitor App handles cold-launch recovery and ignores a second link while the reset form is active', async () => {
   const app = loadApp(), db = authBackend()
   let listener
   const coldUrl = 'receiptgo://reset-password#access_token=cold-access&refresh_token=cold-refresh&type=recovery'
@@ -99,7 +118,22 @@ test('Capacitor App handles both cold-launch and running-app recovery links', as
   assert.equal(db.calls.sessions.length, 1)
   await listener({ url: 'receiptbox://reset-password#access_token=warm-access&refresh_token=warm-refresh&type=recovery' })
   await new Promise(resolve => setImmediate(resolve))
-  assert.equal(db.calls.sessions.length, 2)
+  assert.equal(db.calls.sessions.length, 1)
+})
+
+test('Capacitor App handles a running-app legacy recovery link', async () => {
+  const app = loadApp(), db = authBackend()
+  let listener
+  app.setBackend(db, null)
+  app.setNativePlugins({ App: {
+    async addListener(name, callback) { assert.equal(name, 'appUrlOpen'); listener = callback },
+    async getLaunchUrl() { return null }
+  } })
+  assert.equal(await app.call('setupNativeRecoveryLinks'), true)
+  await listener({ url: 'receiptbox://reset-password#access_token=warm-access&refresh_token=warm-refresh&type=recovery' })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(db.calls.sessions.length, 1)
+  assert.equal(app.run('recoverySessionReady'), true)
 })
 
 test('recovery password validates confirmation and updates through Supabase Auth', async () => {
@@ -130,6 +164,43 @@ test('invalid or expired native recovery links show a friendly recoverable error
   assert.match(app.element('loginMsg').innerHTML, /invalid or has expired/)
   assert.doesNotMatch(app.element('loginMsg').innerHTML, /Sensitive|otp_expired|access_denied/)
   assert.equal(app.element('loginForm').classList.contains('hidden'), false)
+  assert.equal(app.run('recoveryDiagnostic'), 'expired_token')
+})
+
+test('password update is not attempted if the recovery session disappears', async () => {
+  const app = loadApp(), db = authBackend()
+  app.setBackend(db, null)
+  await app.call('handleNativeRecoveryUrl', 'receiptgo://reset-password#access_token=private-access&refresh_token=private-refresh&type=recovery')
+  db.auth.getSession = async () => ({ data: { session: null }, error: null })
+  app.element('recoveryPassword').value = 'new-password-123'
+  app.element('recoveryPasswordConfirm').value = 'new-password-123'
+  assert.equal(await app.call('submitRecoveryPassword'), false)
+  assert.equal(db.calls.updates.length, 0)
+  assert.equal(app.run('recoveryDiagnostic'), 'no_session')
+  assert.match(app.element('loginMsg').innerHTML, /could not be updated/)
+})
+
+test('a rejected password update keeps friendly copy and records only a safe error category', async () => {
+  const app = loadApp(), db = authBackend()
+  app.setBackend(db, null)
+  await app.call('handleNativeRecoveryUrl', 'receiptgo://reset-password#access_token=private-access&refresh_token=private-refresh&type=recovery')
+  db.auth.updateUser = async () => ({ data: null, error: { code: 'unexpected_auth_failure', message: 'private provider detail' } })
+  app.element('recoveryPassword').value = 'new-password-123'
+  app.element('recoveryPasswordConfirm').value = 'new-password-123'
+  assert.equal(await app.call('submitRecoveryPassword'), false)
+  assert.equal(app.run('recoveryDiagnostic'), 'update_user_error')
+  assert.match(app.element('loginMsg').innerHTML, /could not be updated/)
+  assert.doesNotMatch(app.element('loginMsg').innerHTML, /private provider detail|private-access|private-refresh/)
+})
+
+test('code exchange errors never open the recovery form or expose the code', async () => {
+  const app = loadApp(), db = authBackend()
+  app.setBackend(db, null)
+  db.auth.exchangeCodeForSession = async () => ({ data: { session: null }, error: { code: 'invalid_grant' } })
+  assert.equal(await app.call('handleNativeRecoveryUrl', 'receiptgo://reset-password?code=private-code'), false)
+  assert.equal(app.run('recoveryDiagnostic'), 'invalid_recovery_token')
+  assert.equal(app.run('passwordRecoveryMode'), false)
+  assert.doesNotMatch(app.element('loginMsg').innerHTML, /private-code/)
 })
 
 test('recovery implementation never logs or renders token parameters', () => {
