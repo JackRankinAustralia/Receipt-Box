@@ -14,7 +14,7 @@ class FixedDate extends realDate {
   }
 }
 
-function loadApp() {
+function loadApp({ origin = 'https://example.test', capacitor } = {}) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)]
     .map(match => match[1])
@@ -66,7 +66,8 @@ function loadApp() {
   const alerts = []
   const openedWindows = []
   const scrollCalls = []
-  const windowLocation = { origin: 'https://example.test', pathname: '/', href: 'https://example.test/', protocol: 'https:', hostname: 'example.test', search: '' }
+  const parsedLocation = new URL(origin)
+  const windowLocation = { origin: parsedLocation.origin, pathname: parsedLocation.pathname || '/', href: parsedLocation.href, protocol: parsedLocation.protocol, hostname: parsedLocation.hostname, search: parsedLocation.search }
   const revokedObjectUrls = []
   let timeoutCounter = 0
   const scheduledTimeouts = new Map()
@@ -99,6 +100,7 @@ function loadApp() {
     location: windowLocation,
     alert(message) { alerts.push(message) }
   })
+  if (capacitor !== undefined) context.Capacitor = capacitor
   vm.runInContext(appScript.slice(0, eventBindings), context, { filename: 'index.html' })
   context.__testEntitlement = { plan: 'pro', ocr: { used: 0, limit: null, allowed: true }, capabilities: { run_ocr: true, create_entity: true, create_project: true, custom_categories: true, advanced_reports: true, export_csv: true, export_pdf: true } }
   vm.runInContext('entitlementState = __testEntitlement', context)
