@@ -2,17 +2,6 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const { loadApp } = require('./load-app')
 
-test('apiUrl keeps browser requests same-origin', () => {
-  const app = loadApp()
-  assert.equal(app.call('apiUrl', '/api/scan-receipt'), '/api/scan-receipt')
-})
-
-test('apiUrl prefixes the production backend for native Capacitor requests', () => {
-  const app = loadApp()
-  app.run("Capacitor = { isNativePlatform: () => true }")
-  assert.equal(app.call('apiUrl', '/api/scan-receipt'), 'https://receipt-box.onrender.com/api/scan-receipt')
-})
-
 test('ordinary local browser origins retain development behaviour', () => {
   for (const origin of ['http://localhost:8000', 'https://localhost', 'http://127.0.0.1', 'http://[::1]', 'file:///index.html']) {
     const app = loadApp({ origin, capacitor: { isNativePlatform: () => false } })

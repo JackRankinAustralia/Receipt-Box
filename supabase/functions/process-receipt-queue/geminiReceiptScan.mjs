@@ -1,8 +1,6 @@
 // Focused Gemini receipt-scan client for the background OCR worker.
-// Deliberately mirrors the proven retry policy and Australian receipt
-// prompt already used by handleScanReceipt() in server.js and
-// scanReceiptWithGemini() in index.html, adapted for direct calls to the
-// Gemini REST API (the Edge Function has no access to the Node server).
+// Owns the retry policy and Australian receipt prompt for the trusted
+// background worker's direct calls to the Gemini REST API.
 //
 // Retry policy (unchanged from the existing working policy):
 //   - retry HTTP 429/500/502/503/504

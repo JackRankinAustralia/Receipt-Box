@@ -14,7 +14,7 @@ process.on('unhandledRejection', reason => {
   console.error('Unhandled promise rejection:', reason)
 })
 
-const REQUIRED_ENV_VARS = ['NODE_ENV', 'PORT', 'ALLOWED_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'GEMINI_API_KEY']
+const REQUIRED_ENV_VARS = ['NODE_ENV', 'PORT', 'ALLOWED_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
 const missingEnvVars = REQUIRED_ENV_VARS.filter(name => !String(process.env[name] || '').trim())
 if (missingEnvVars.length > 0) {
   console.error(`Missing required environment variable(s): ${missingEnvVars.join(', ')}. See .env.example.`)
@@ -35,99 +35,12 @@ try {
     return callback(new Error('Origin is not allowed by CORS.'))
   } }))
   var apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false })
-  var scanLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
   app.use('/api', apiLimiter)
   app.post('/api/webhooks/resend', express.raw({ type: 'application/json', limit: '1mb' }), createResendSupportWebhookHandler())
   app.use(express.json({ limit: '12mb' }))
 } catch (error) {
   console.error('Failed to initialize middleware:', error)
 }
-
-function sanitizeGeminiApiKey(value) {
-  return String(value || '').trim().replace(/^["']+|["']+$/g, '').trim()
-}
-
-if (!sanitizeGeminiApiKey(process.env.GEMINI_API_KEY) || sanitizeGeminiApiKey(process.env.GEMINI_API_KEY) === 'your_gemini_api_key_here') {
-  console.warn('⚠️ GEMINI_API_KEY is not configured in .env')
-}
-
-function sendJson(response, status, body) {
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
-  response.end(JSON.stringify(body))
-}
-
-function readRequestBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = ''
-    request.setEncoding('utf8')
-    request.on('data', chunk => {
-      body += chunk
-      if (body.length > 12 * 1024 * 1024) reject(new Error('Request body is too large.'))
-    })
-    request.on('end', () => resolve(body))
-    request.on('error', reject)
-  })
-}
-
-async function handleScanReceipt(request, response) {
-  const contentLength = Number(request.headers['content-length'] || 0)
-  const bodyKeys = request.body && typeof request.body === 'object' ? Object.keys(request.body) : []
-  console.log(`scan-receipt request: contentLength=${contentLength} bytes, bodyKeys=[${bodyKeys.join(', ')}]`)
-  const geminiApiKey = sanitizeGeminiApiKey(process.env.GEMINI_API_KEY)
-  if (!geminiApiKey) {
-    console.error('scan-receipt 500: GEMINI_API_KEY is not configured on the server.')
-    response.status(500).json({ error: { message: 'Server missing GEMINI_API_KEY configuration.' } })
-    return
-  }
-  const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
-
-  try {
-    const payload = request.body
-    if (!payload || typeof payload !== 'object' || !Array.isArray(payload.contents)) {
-      console.error('scan-receipt 400: request body missing a valid contents array.', { bodyType: typeof payload, hasContents: Array.isArray(payload?.contents) })
-      response.status(400).json({ error: { message: 'Request must contain a contents array.' } })
-      return
-    }
-
-    const MAX_ATTEMPTS = 3
-    const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504])
-    const BACKOFF_MS = [0, 1000, 2000]
-
-    let upstream
-    let text
-    let body
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      if (BACKOFF_MS[attempt - 1] > 0) await new Promise(resolve => setTimeout(resolve, BACKOFF_MS[attempt - 1]))
-
-      upstream = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
-        body: JSON.stringify(payload)
-      })
-      text = await upstream.text()
-      try {
-        body = JSON.parse(text)
-      } catch {
-        body = { error: { message: text || `Gemini API returned HTTP ${upstream.status}.` } }
-      }
-
-      if (upstream.ok) break
-
-      const isRetryable = RETRYABLE_STATUS_CODES.has(upstream.status)
-      if (!isRetryable || attempt === MAX_ATTEMPTS) break
-
-      console.error(`Gemini temporary failure (${upstream.status}), retrying attempt ${attempt + 1} of ${MAX_ATTEMPTS}`)
-    }
-
-    if (!upstream.ok) console.error('Google Gemini API error response:', JSON.stringify(body))
-    response.status(upstream.status).json(body)
-  } catch (error) {
-    console.error('Gemini API Error:', error)
-    response.status(500).json({ error: { message: 'Receipt processing failed.' } })
-  }
-}
-app.post(['/api/scan-receipt', '/api/scan'], scanLimiter, handleScanReceipt)
 
 const publicPages = new Map([
   ['/privacy', 'privacy.html'],
