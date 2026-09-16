@@ -229,6 +229,58 @@ test('extractMeaningfulReceiptFields requires at least one real field', async ()
   assert.equal(negativeTotal.meaningful, false)
 })
 
+test('unknown OCR money stays null while genuine numeric zero remains zero', async () => {
+  const { extractMeaningfulReceiptFields } = await loadGemini()
+  const { normaliseAustralianReceiptDate } = await loadDates()
+  const unknownValues = [null, undefined, '', '   ', 'not a number', false, {}, []]
+
+  for (const field of ['total', 'gst']) {
+    for (const value of unknownValues) {
+      const result = extractMeaningfulReceiptFields({ [field]: value }, normaliseAustralianReceiptDate)
+      assert.equal(result[field], null, `${field} should stay unknown for ${String(value)}`)
+      assert.equal(result.meaningful, false)
+    }
+
+    for (const value of [0, '0', '0.00']) {
+      const result = extractMeaningfulReceiptFields({ [field]: value }, normaliseAustralianReceiptDate)
+      assert.equal(result[field], 0, `${field} should preserve ${String(value)} as zero`)
+      assert.equal(result.meaningful, true)
+    }
+
+    for (const [value, expected] of [[12.5, 12.5], ['12.50', 12.5], [' 19.95 ', 19.95]]) {
+      const result = extractMeaningfulReceiptFields({ [field]: value }, normaliseAustralianReceiptDate)
+      assert.equal(result[field], expected)
+      assert.equal(result.meaningful, true)
+    }
+  }
+})
+
+test('supported worker path passes unknown total and GST to completion as null', async () => {
+  const { processReceiptQueueBatch } = await loadWorkflow()
+  const { extractMeaningfulReceiptFields } = await loadGemini()
+  const { normaliseAustralianReceiptDate } = await loadDates()
+  let completeArgs
+
+  const summary = await processReceiptQueueBatch({
+    maxReceipts: 1,
+    generateSessionId: () => 'session-x',
+    claimNext: async () => makeClaim(),
+    beginEntitlement: async () => ({ allowed: true }),
+    downloadReceiptFile: async () => 'base64image',
+    callGemini: async () => ({ ok: true, fields: { supplier: 'Known Shop', total: null, gst: '' } }),
+    extractMeaningfulFields: fields => extractMeaningfulReceiptFields(fields, normaliseAustralianReceiptDate),
+    completeOcr: async (receiptId, sessionId, outcome) => {
+      completeArgs = outcome
+      return { workflow_status: 'needs_review' }
+    }
+  })
+
+  assert.equal(summary.succeeded, 1)
+  assert.equal(completeArgs.success, true)
+  assert.equal(completeArgs.total, null)
+  assert.equal(completeArgs.gst, null)
+})
+
 test('Gemini retry policy retries 503 up to 3 attempts then reports retryable failure', async () => {
   const { callGeminiForReceipt } = await loadGemini()
   let calls = 0

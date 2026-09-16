@@ -100,6 +100,23 @@ test('save preserves manual OCR corrections and keeps the saved receipt open for
   assert.match(app.element('saveMsg').innerHTML, /Receipt saved\.<\/strong> You can keep editing, add another, or view it in Receipts\./i)
 })
 
+test('saving reviewed OCR data preserves unknown GST as null and genuine zero as zero', async () => {
+  for (const [gst, expected] of [['', null], ['0', 0], ['0.00', 0], ['8.04', 8.04]]) {
+    const app = loadApp()
+    const db = backend([receipt({ id: 'needs-review-1', workflow_status: 'needs_review', gst: null })])
+    app.setBackend(db)
+    app.setRows(db.rows)
+    await app.call('loadSettings')
+    await app.call('reviewReceipt', 'needs-review-1')
+    app.element('gst').value = gst
+
+    await app.call('save')
+
+    assert.equal(db.calls.updates.length, 1)
+    assert.equal(db.calls.updates[0].payload.gst, expected)
+  }
+})
+
 test('dashboard totals exclude incomplete receipts', async () => {
   const app = loadApp()
   const db = backend([

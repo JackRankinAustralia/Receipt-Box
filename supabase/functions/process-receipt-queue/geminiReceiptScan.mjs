@@ -73,14 +73,23 @@ export async function callGeminiForReceipt({ apiKey, base64Image, mimeType, fetc
 export function extractMeaningfulReceiptFields(fields, normaliseDate) {
   const supplier = typeof fields?.supplier === 'string' && fields.supplier.trim() ? fields.supplier.trim() : null
   const date = normaliseDate(fields?.date_text || fields?.date) || (String(fields?.date || '').match(/^\d{4}-\d{2}-\d{2}$/)?.[0] || null)
-  const total = Number(fields?.total)
-  const gst = Number(fields?.gst)
+  const total = normaliseOcrMoney(fields?.total)
+  const gst = normaliseOcrMoney(fields?.gst)
   const result = {
     supplier,
     date,
-    total: Number.isFinite(total) && total >= 0 ? total : null,
-    gst: Number.isFinite(gst) && gst >= 0 ? gst : null
+    total,
+    gst
   }
   const meaningful = Boolean(result.supplier || result.date || result.total !== null || result.gst !== null)
   return { ...result, meaningful }
+}
+
+function normaliseOcrMoney(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  if (!text) return null
+  const number = Number(text)
+  return Number.isFinite(number) && number >= 0 ? number : null
 }
