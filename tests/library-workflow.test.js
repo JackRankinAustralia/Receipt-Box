@@ -117,6 +117,45 @@ test('saving reviewed OCR data preserves unknown GST as null and genuine zero as
   }
 })
 
+test('clearing GST on an existing receipt saves and reloads it as unknown', async () => {
+  const app = loadApp()
+  const db = backend([receipt({ id: 'completed-1', workflow_status: 'completed', gst: 2.27 })])
+  app.setBackend(db)
+  app.setRows(db.rows)
+  await app.call('loadSettings')
+  await app.call('editReceipt', 'completed-1')
+  app.element('gst').value = ''
+
+  await app.call('save')
+
+  assert.equal(db.calls.updates.length, 1)
+  assert.equal(db.calls.updates[0].payload.gst, null)
+  assert.equal(db.rows[0].gst, null)
+  app.call('openDetail', 'completed-1')
+  assert.match(app.element('detailBody').innerHTML, /<strong>GST<\/strong><br>—/)
+  assert.doesNotMatch(app.element('detailBody').innerHTML, /<strong>GST<\/strong><br>\$0\.00/)
+})
+
+test('individual receipt displays distinguish unknown money from genuine zero', () => {
+  const app = loadApp()
+  assert.equal(app.run('receiptMoney(null)'), '—')
+  assert.equal(app.run('receiptMoney(undefined)'), '—')
+  assert.equal(app.run("receiptMoney('')"), '—')
+  assert.equal(app.run('receiptMoney(0)'), '$0.00')
+  assert.equal(app.run("receiptMoney('0.00')"), '$0.00')
+
+  app.setRows([
+    receipt({ id: 'unknown-money', total: null, gst: null }),
+    receipt({ id: 'zero-money', total: 0, gst: 0 })
+  ])
+  app.call('openDetail', 'unknown-money')
+  assert.match(app.element('detailBody').innerHTML, /<strong>Total<\/strong><br>—/)
+  assert.match(app.element('detailBody').innerHTML, /<strong>GST<\/strong><br>—/)
+  app.call('openDetail', 'zero-money')
+  assert.match(app.element('detailBody').innerHTML, /<strong>Total<\/strong><br>\$0\.00/)
+  assert.match(app.element('detailBody').innerHTML, /<strong>GST<\/strong><br>\$0\.00/)
+})
+
 test('dashboard totals exclude incomplete receipts', async () => {
   const app = loadApp()
   const db = backend([
@@ -474,6 +513,26 @@ test('selecting an image automatically reads and fills receipt fields once', asy
   assert.match(app.element('ocrStatus').innerHTML, /Receipt details filled in/i)
   await app.call('readReceiptWithGemini')
   assert.equal(reads, 2, 'Read again remains available after automatic reading')
+})
+
+test('foreground OCR keeps unknown money blank while accepting genuine zero', async () => {
+  const app = loadApp(), db = backend()
+  db.rpc = async name => name === 'begin_ocr_scan' ? { data: { allowed: true }, error: null } : { data: {}, error: null }
+  app.setBackend(db)
+  app.setFunction('prepareReceiptFile', async file => file)
+  app.setFunction('fileToBase64', async () => 'test-image')
+  app.setFunction('scanReceiptWithGemini', async () => ({ supplier: 'Unknown values', date: '2025-10-23', total: null, gst: null }))
+  const image = new File([new Uint8Array([1])], 'receipt.jpg', { type: 'image/jpeg' })
+  app.element('libraryFile').files = [image]
+  await app.call('handleReceiptSelection', image)
+  await waitFor(() => app.element('supplier').value === 'Unknown values')
+  assert.equal(app.element('amount').value, '')
+  assert.equal(app.element('gst').value, '')
+
+  app.setFunction('scanReceiptWithGemini', async () => ({ supplier: 'Zero values', date: '2025-10-23', total: 0, gst: '0.00' }))
+  await app.call('readReceiptWithGemini')
+  assert.equal(app.element('amount').value, '0.00')
+  assert.equal(app.element('gst').value, '0.00')
 })
 
 test('does not auto-read PDFs and leaves them available for saving', () => {
