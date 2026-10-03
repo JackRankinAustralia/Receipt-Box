@@ -17,6 +17,8 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		A5D5C0022FC0000100B10C01 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5D5C0012FC0000100B10C01 /* PrivacyInfo.xcprivacy */; };
+		B6E7A0033000000100A11E01 /* ReceiptGoStoreKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E7A0013000000100A11E01 /* ReceiptGoStoreKitPlugin.swift */; };
+		B6E7A0043000000100A11E01 /* ReceiptGoViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E7A0023000000100A11E01 /* ReceiptGoViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +34,8 @@
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A5D5C0012FC0000100B10C01 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B6E7A0013000000100A11E01 /* ReceiptGoStoreKitPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptGoStoreKitPlugin.swift; sourceTree = "<group>"; };
+		B6E7A0023000000100A11E01 /* ReceiptGoViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptGoViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -67,6 +71,8 @@
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				B6E7A0023000000100A11E01 /* ReceiptGoViewController.swift */,
+				B6E7A0013000000100A11E01 /* ReceiptGoStoreKitPlugin.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -164,6 +170,8 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				B6E7A0033000000100A11E01 /* ReceiptGoStoreKitPlugin.swift in Sources */,
+				B6E7A0043000000100A11E01 /* ReceiptGoViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

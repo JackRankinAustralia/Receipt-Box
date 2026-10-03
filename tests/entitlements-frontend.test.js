@@ -11,17 +11,95 @@ const free = (overrides={}) => ({
   ...overrides
 })
 
-test('central entitlement service exposes Free usage and locked report/export states', () => {
+test('central entitlement service exposes Free usage and locked report/export states', async () => {
   const app = loadApp()
   app.setEntitlementFixture(free({ocr:{used:8,limit:10,allowed:true}}))
   assert.match(app.element('accountMsg').innerHTML,/8 of 10 OCR scans used/)
   assert.equal(app.element('advancedReportsLock').classList.contains('hidden'),false)
-  app.call('exportReportCSV')
+  await app.call('exportReportCSV')
   assert.equal(app.element('detailTitle').textContent,'ReceiptGo Pro')
-  assert.match(app.element('detailBody').innerHTML,/A\$3\.99/)
-  assert.match(app.element('detailBody').innerHTML,/A\$29\.99/)
-  assert.match(app.element('detailBody').innerHTML,/Coming Soon/)
-  assert.match(app.element('detailBody').innerHTML,/10-scan monthly Free allowance/)
+  assert.match(app.element('detailBody').innerHTML,/Price unavailable/)
+  assert.doesNotMatch(app.element('detailBody').innerHTML,/A\$3\.99|A\$29\.99|Coming Soon/)
+  assert.match(app.element('detailBody').innerHTML,/Terms of Use/)
+})
+
+test('native StoreKit UI uses Apple localised price and verifies purchase server-side', async () => {
+  const calls=[]
+  const plugin={
+    async getProducts(){return{products:[{id:'com.receiptgo.pro.monthly',displayPrice:'$4.49',period:'month'}]}},
+    async purchase(options){calls.push(['purchase',options]);return{result:'verified',transaction:{transactionId:'1001',signedTransaction:'signed-jws'}}},
+    async finishTransaction(options){calls.push(['finish',options])},
+    async currentEntitlements(){return{transactions:[]}},
+    async addListener(){},
+  }
+  const app=loadApp({capacitor:{isNativePlatform:()=>true,Plugins:{ReceiptGoStoreKit:plugin}}})
+  app.setBackend({
+    async rpc(name){return name==='get_my_entitlement'?{data:free(),error:null}:{data:{},error:null}},
+    functions:{async invoke(name,options){calls.push([name,options]);return{data:{subscription:{active:true}},error:null}}}
+  },{id:'11111111-1111-4111-8111-111111111111'})
+  app.setEntitlementFixture(free())
+  await app.call('showProInfo')
+  assert.match(app.element('detailBody').innerHTML,/\$4\.49/)
+  assert.doesNotMatch(app.element('detailBody').innerHTML,/A\$3\.99/)
+  await app.run('appleSubscriptionService.purchase()')
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),['purchase',{appAccountToken:'11111111-1111-4111-8111-111111111111'}])
+  assert.equal(calls[1][0],'verify-apple-subscription')
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[2])),['finish',{transactionId:'1001'}])
+})
+
+test('cancelled Apple purchase does not call the entitlement verifier', async () => {
+  let invokes=0
+  const plugin={async getProducts(){return{products:[{id:'com.receiptgo.pro.monthly',displayPrice:'A$3.99',period:'month'}]}},async purchase(){return{result:'cancelled'}}}
+  const app=loadApp({capacitor:{isNativePlatform:()=>true,Plugins:{ReceiptGoStoreKit:plugin}}})
+  app.setBackend({functions:{async invoke(){invokes++;return{}}}},{id:'11111111-1111-4111-8111-111111111111'})
+  app.setEntitlementFixture(free())
+  await app.call('showProInfo')
+  assert.equal(await app.run('appleSubscriptionService.purchase()'),false)
+  assert.equal(invokes,0)
+})
+
+test('failed server verification never finishes or grants an Apple purchase', async () => {
+  let finishes=0
+  const plugin={
+    async getProducts(){return{products:[{id:'com.receiptgo.pro.monthly',displayPrice:'A$3.99',period:'month'}]}},
+    async purchase(){return{result:'verified',transaction:{transactionId:'1001',signedTransaction:'invalid-jws'}}},
+    async finishTransaction(){finishes++},
+  }
+  const app=loadApp({capacitor:{isNativePlatform:()=>true,Plugins:{ReceiptGoStoreKit:plugin}}})
+  app.setBackend({functions:{async invoke(){return{data:null,error:{message:'verification rejected'}}}}},{id:'11111111-1111-4111-8111-111111111111'})
+  app.setEntitlementFixture(free())
+  await app.call('showProInfo')
+  assert.equal(await app.run('appleSubscriptionService.purchase()'),false)
+  assert.equal(finishes,0)
+  assert.equal(app.state().entitlementState.plan,'free')
+})
+
+test('Restore Purchases re-verifies the active StoreKit entitlement with Supabase', async () => {
+  const calls=[]
+  const plugin={
+    async getProducts(){return{products:[{id:'com.receiptgo.pro.monthly',displayPrice:'A$3.99',period:'month'}]}},
+    async restorePurchases(){calls.push(['restore']);return{transactions:[{transactionId:'1002',signedTransaction:'restored-jws'}]}},
+    async finishTransaction(options){calls.push(['finish',options])},
+  }
+  const app=loadApp({capacitor:{isNativePlatform:()=>true,Plugins:{ReceiptGoStoreKit:plugin}}})
+  app.setBackend({
+    async rpc(name){return name==='get_my_entitlement'?{data:free({plan:'pro',ocr:{used:0,limit:null,allowed:true}}),error:null}:{data:{is_active:true},error:null}},
+    functions:{async invoke(name){calls.push([name]);return{data:{subscription:{active:true}},error:null}}},
+  },{id:'11111111-1111-4111-8111-111111111111'})
+  app.setEntitlementFixture(free())
+  await app.call('showProInfo')
+  assert.equal(await app.run('appleSubscriptionService.restore()'),true)
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.slice(0,3))),[
+    ['restore'],['verify-apple-subscription'],['finish',{transactionId:'1002'}],
+  ])
+})
+
+test('manual Pro and Apple Pro remain distinguishable in account UI', () => {
+  const app=loadApp()
+  app.setEntitlementFixture(free({plan:'pro',ocr:{used:3,limit:null,allowed:true},apple_subscription:null}))
+  assert.match(app.element('accountMsg').innerHTML,/Subscription options/)
+  app.setEntitlementFixture(free({plan:'pro',ocr:{used:3,limit:null,allowed:true},apple_subscription:{is_active:true}}))
+  assert.match(app.element('accountMsg').innerHTML,/Manage Apple subscription/)
 })
 
 test('Free creation checks use the central service while existing values remain available', async () => {

@@ -5,6 +5,7 @@ const path = require('node:path')
 
 const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260821150000_add_free_pro_entitlements.sql'), 'utf8')
 const quotaMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20260822100000_reduce_free_ocr_limit_to_10.sql'), 'utf8')
+const appleMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '20261003120000_add_apple_subscription_entitlements.sql'), 'utf8')
 const owner = '11111111-1111-4111-8111-111111111111'
 const newcomer = '33333333-3333-4333-8333-333333333333'
 
@@ -196,5 +197,32 @@ test('entitlement and OCR-session RLS isolate users', async () => {
     assert.equal((await db.query('select count(*)::int count from user_entitlements')).rows[0].count,1)
     assert.equal((await db.query('select count(*)::int count from ocr_scan_sessions')).rows[0].count,0)
     await assert.rejects(db.query("select public.begin_ocr_scan('00000000-0000-4000-8000-000000000099')"),/another user/)
+  } finally { await db.close() }
+})
+
+test('Apple subscriptions add Pro without overwriting independent manual entitlements', async () => {
+  const { PGlite } = await import('@electric-sql/pglite')
+  const db = new PGlite()
+  try {
+    await entitlementSchema(db)
+    await db.exec(appleMigration)
+    await db.query('insert into auth.users(id) values($1)',[newcomer])
+    await db.query(`insert into apple_subscriptions(original_transaction_id,user_id,app_account_token,product_id,transaction_id,environment,status,purchased_at,expires_at,last_signed_at)
+      values('100',$1,$1,'com.receiptgo.pro.monthly','101','Sandbox','active',now(),now()+interval '1 month',now())`,[newcomer])
+    await asUser(db,newcomer)
+    assert.equal((await db.query('select public.get_my_entitlement() value')).rows[0].value.plan,'pro')
+    const apple=(await db.query('select public.get_my_apple_subscription() value')).rows[0].value
+    assert.equal(apple.product_id,'com.receiptgo.pro.monthly')
+    assert.equal(apple.is_active,true)
+    await assert.rejects(db.query('select * from apple_subscriptions'))
+    await assert.rejects(db.query("update apple_subscriptions set status='expired'"))
+
+    await db.exec("reset role; update apple_subscriptions set status='expired',expires_at=now()-interval '1 day' where user_id='"+newcomer+"'")
+    await asUser(db,newcomer)
+    assert.equal((await db.query('select public.get_my_entitlement() value')).rows[0].value.plan,'free')
+
+    await db.exec("reset role; update user_entitlements set plan='pro',status='active',source='manual' where user_id='"+newcomer+"'")
+    await asUser(db,newcomer)
+    assert.equal((await db.query('select public.get_my_entitlement() value')).rows[0].value.plan,'pro')
   } finally { await db.close() }
 })

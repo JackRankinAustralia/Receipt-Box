@@ -1,0 +1,7 @@
+[functions.verify-apple-subscription]
+verify_jwt = true
+
+# Apple calls this endpoint without a Supabase token. The function verifies
+# Apple's signed JWS payload before accepting any subscription state.
+[functions.apple-subscription-notifications]
+verify_jwt = false
